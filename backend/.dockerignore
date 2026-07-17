@@ -1,0 +1,6 @@
+tmp/
+build-errors.log
+.env
+.env.*
+!.env.example
+.git

@@ -1,0 +1,100 @@
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_DATABASE:-FlowPos}
+      MYSQL_USER: ${DB_USERNAME:-app_booking}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    ports:
+      # Host port for optional external DB access (the app + phpMyAdmin use
+      # the internal Docker network). Default 3310 is offset from the other
+      # mini-app stacks so they can all run at once:
+      #   ai-builder: mysql 3306/3307   quotes: mysql 3308   appointments: mysql 3309
+      - "${MYSQL_HOST_PORT:-3310}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # One-off job: applies pending migrations, then exits. The server itself
+  # never auto-migrates, so this runs ahead of it.
+  migrate:
+    build: ./backend
+    entrypoint: ["migrate"]
+    command: ["run"]
+    environment:
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-FlowPos}
+      DB_USERNAME: ${DB_USERNAME:-app_booking}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  backend:
+    build: ./backend
+    environment:
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ${DB_DATABASE:-FlowPos}
+      DB_USERNAME: ${DB_USERNAME:-app_booking}
+      DB_PASSWORD: ${DB_PASSWORD:-secret}
+      PORT: 8080
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
+      JWT_DEV_TOKENS: ${JWT_DEV_TOKENS:-true}
+      FLOWPOS_SIGNING_SECRET: ${FLOWPOS_SIGNING_SECRET:-dev-insecure-signing-secret-change-me}
+    ports:
+      - "${BACKEND_HOST_PORT:-8086}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+      # frontend/package.json pulls in the shared UI kit via local file:
+      # deps (file:../../ui-kit/packages/...). That workspace lives outside
+      # this build context, so hand the builder the whole thing under a
+      # named context the Dockerfile can COPY --from=. We need
+      # ui-kit/node_modules too, not just packages/ — the packages' own
+      # dependencies (e.g. class-variance-authority) only resolve there, the
+      # same way they do for local (non-Docker) dev.
+      additional_contexts:
+        - ui-kit=../ui-kit
+      args:
+        # Origins allowed to complete the apps-sdk postMessage handshake
+        # (theme sync, etc.) when this app is embedded in tenant-dashboard —
+        # see frontend/src/app/use-embed.ts.
+        VITE_FLOWPOS_DASHBOARD_ORIGINS: ${VITE_FLOWPOS_DASHBOARD_ORIGINS:-https://app.flowpos.dev}
+    ports:
+      # Host port 3003 — offset from the other mini-app frontends
+      # (ai-builder 3000, quotes 3001, appointments 3002).
+      - "${FRONTEND_HOST_PORT:-3003}:80"
+    depends_on:
+      - backend
+
+  # Web UI for browsing the MySQL database at http://localhost:8087
+  # (server: mysql, user: root, password: ${MYSQL_ROOT_PASSWORD:-root}).
+  phpmyadmin:
+    image: phpmyadmin:5
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 64M
+    ports:
+      - "${PHPMYADMIN_HOST_PORT:-8087}:80"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+volumes:
+  mysql_data:

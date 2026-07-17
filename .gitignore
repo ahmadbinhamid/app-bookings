@@ -1,0 +1,29 @@
+tmp/
+build-errors.log
+*.exe
+*.test
+*.out
+.env
+.env.*
+!.env.example
+
+# frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# editor / OS
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
