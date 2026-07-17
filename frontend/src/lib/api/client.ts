@@ -7,6 +7,23 @@ export const apiClient = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// ApiError carries whatever extra fields the backend attached to an error
+// response (e.g. booking propose's {code, service_id, reason} — see
+// internal/server/handlers/errors.go) alongside the usual .message, so
+// callers that need to branch on structured data can, while everything
+// that just wants `.message` keeps working unchanged.
+export class ApiError extends Error {
+  code?: string;
+  serviceId?: string;
+  reason?: string;
+
+  constructor(message: string, extra?: { code?: string; serviceId?: string; reason?: string }) {
+    super(message);
+    this.name = "ApiError";
+    Object.assign(this, extra);
+  }
+}
+
 // Request interceptor: attach the session JWT (see lib/auth-token.ts) to
 // every call. There's nothing else to add yet (no tenant header, no
 // multi-location context) — this is the one place to add it later.
@@ -40,6 +57,6 @@ apiClient.interceptors.response.use(
       (data?.errors && Object.values(data.errors)[0]) ??
       err.message ??
       "Something went wrong";
-    return Promise.reject(new Error(message));
+    return Promise.reject(new ApiError(message, { code: data?.code, serviceId: data?.service_id, reason: data?.reason }));
   }
 );

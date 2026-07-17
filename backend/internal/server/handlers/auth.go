@@ -49,6 +49,18 @@ func tenantID(c *gin.Context) uint64 {
 	return 0
 }
 
+// adminIDFrom returns the calling user's id for BOOKING.created_by_admin_id
+// (audit only, design doc — "any admin can cancel/reschedule any booking").
+// nil if unset, since UserID is optional on the JWT claims.
+func adminIDFrom(c *gin.Context) *uint64 {
+	claims := claimsFrom(c)
+	if claims == nil || claims.UserID == 0 {
+		return nil
+	}
+	id := claims.UserID
+	return &id
+}
+
 // DevTokenHandler mints JWTs for local testing. It is only mounted when dev
 // tokens are enabled (JWT_DEV_TOKENS=true) and must be disabled in prod — the
 // real token is issued by the main FlowPOS system.

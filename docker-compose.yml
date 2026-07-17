@@ -47,6 +47,9 @@ services:
       DB_USERNAME: ${DB_USERNAME:-app_booking}
       DB_PASSWORD: ${DB_PASSWORD:-secret}
       PORT: 8080
+      # FlowPOS API this app calls on the tenant's behalf (employee/location
+      # sync — internal/modules/sync — and, later, any other catalog calls).
+      FLOWPOS_API_URL: ${FLOWPOS_API_URL:-https://api.flowpos.dev/v1}
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me}
       JWT_DEV_TOKENS: ${JWT_DEV_TOKENS:-true}
       FLOWPOS_SIGNING_SECRET: ${FLOWPOS_SIGNING_SECRET:-dev-insecure-signing-secret-change-me}

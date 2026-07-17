@@ -3,6 +3,8 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -23,6 +25,17 @@ type Config struct {
 	// SigningSecret verifies the X-Flowpos-Signature header on
 	// /install, /uninstall, and /webhooks.
 	SigningSecret string
+
+	// FlowposAPIURL is the base URL of the core FlowPOS API this app calls
+	// on each tenant's behalf (using their installation api_key) to sync
+	// locations and employees. Same idea as quotes' FLOWPOS_API_URL.
+	FlowposAPIURL string
+	// SyncInterval is how often the background sync job re-syncs every
+	// installed tenant's locations/employees. There is no existing
+	// cron/scheduler convention in the sibling apps to mirror (checked —
+	// none of them have one), so this is an in-process time.Ticker; see
+	// internal/modules/sync/scheduler.go for the single-replica caveat.
+	SyncInterval time.Duration
 }
 
 func Load() Config {
@@ -50,6 +63,9 @@ func Load() Config {
 		JWTSecret:      jwtSecret,
 		AllowDevTokens: os.Getenv("JWT_DEV_TOKENS") == "true",
 		SigningSecret:  signingSecret,
+
+		FlowposAPIURL: getenv("FLOWPOS_API_URL", "https://api.flowpos.dev/v1"),
+		SyncInterval:  getenvDuration("SYNC_INTERVAL_MINUTES", 60*time.Minute),
 	}
 }
 
@@ -58,4 +74,17 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getenvDuration(key string, fallback time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	minutes, err := strconv.Atoi(v)
+	if err != nil || minutes <= 0 {
+		log.Printf("WARNING: invalid %s=%q, using default %s", key, v, fallback)
+		return fallback
+	}
+	return time.Duration(minutes) * time.Minute
 }

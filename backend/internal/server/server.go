@@ -2,11 +2,21 @@ package server
 
 import (
 	"database/sql"
+	"net/http"
 	"reflect"
 	"strings"
 
 	"app-booking/internal/config"
+	"app-booking/internal/flowpos"
+	"app-booking/internal/modules/assignments"
+	"app-booking/internal/modules/booking"
+	"app-booking/internal/modules/employee"
 	"app-booking/internal/modules/installation"
+	"app-booking/internal/modules/location"
+	"app-booking/internal/modules/schedules"
+	"app-booking/internal/modules/services"
+	"app-booking/internal/modules/sync"
+	"app-booking/internal/modules/timeoff"
 	"app-booking/internal/server/handlers"
 
 	"github.com/gin-gonic/gin"
@@ -18,13 +28,14 @@ import (
 type Server struct {
 	cfg    config.Config
 	engine *gin.Engine
+
+	// SyncScheduler is started by cmd/server/main.go (`go srv.SyncScheduler.Start(ctx)`)
+	// after New() returns — kept separate from route wiring since it isn't
+	// an HTTP concern.
+	SyncScheduler *sync.Scheduler
 }
 
-// New builds the router and mounts every feature's routes. This is boilerplate:
-// only the installation/auth/health scaffolding exists so far — add new
-// feature modules the same way the appointments/quotes apps do (a
-// internal/modules/<feature> package + a handlers.New<Feature>Handler(...)
-// call here).
+// New builds the router and mounts every feature's routes.
 func New(cfg config.Config, conn *sql.DB) *Server {
 	useJSONFieldNames()
 
@@ -39,7 +50,8 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	})
 
 	// installation feature (marketplace lifecycle)
-	instSvc := installation.NewService(installation.NewRepository(conn))
+	instRepo := installation.NewRepository(conn)
+	instSvc := installation.NewService(instRepo)
 
 	// Marketplace lifecycle: FlowPOS calls these directly (no tenant JWT),
 	// signing each request with this app's signing secret. Mounted at the
@@ -63,16 +75,105 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	protected.Use(handlers.AuthMiddleware(cfg.JWTSecret))
 	protected.GET("/me", handlers.NewMeHandler(instSvc).Me)
 
-	// Add new feature modules below, e.g.:
-	//   fooSvc := foo.NewService(foo.NewRepository(conn))
-	//   handlers.NewFooHandler(fooSvc).Register(api)
+	// --- Repositories + services for every domain module ---
+	locRepo := location.NewRepository(conn)
+	locSvc := location.NewService(locRepo)
+	empRepo := employee.NewRepository(conn)
+	empSvc := employee.NewService(empRepo)
+	svcRepo := services.NewRepository(conn)
+	svcSvc := services.NewService(svcRepo)
+	assignRepo := assignments.NewRepository(conn)
+	assignSvc := assignments.NewService(assignRepo)
+	scheduleRepo := schedules.NewRepository(conn)
+	scheduleSvc := schedules.NewService(scheduleRepo)
+	timeOffRepo := timeoff.NewRepository(conn)
+	timeOffSvc := timeoff.NewService(timeOffRepo)
+	bookingRepo := booking.NewRepository(conn)
+	bookingSvc := booking.NewService(bookingRepo, svcSvc, locSvc)
 
-	return &Server{cfg: cfg, engine: r}
+	locationHandler := handlers.NewLocationHandler(locSvc)
+	employeeHandler := handlers.NewEmployeeHandler(empSvc)
+	serviceHandler := handlers.NewServiceHandler(svcSvc)
+	assignmentHandler := handlers.NewAssignmentHandler(assignSvc, empSvc)
+	scheduleHandler := handlers.NewScheduleHandler(scheduleSvc)
+	timeOffHandler := handlers.NewTimeOffHandler(timeOffSvc)
+	bookingHandler := handlers.NewBookingHandler(bookingSvc)
+
+	protected.GET("/locations", locationHandler.List)
+
+	// Every route below is nested under a specific, tenant-owned location —
+	// RequireLocationOwnership (internal/server/handlers/ownership.go) is
+	// the single shared check every one of them relies on, instead of each
+	// handler re-implementing its own (that's what the Phase 2 employees
+	// endpoint originally did ad hoc — extracted per this round's review).
+	locGroup := protected.Group("/locations/:locationId")
+	locGroup.Use(handlers.RequireLocationOwnership(locSvc))
+
+	locGroup.PATCH("/timezone", locationHandler.SetTimezone)
+	locGroup.GET("/employees", employeeHandler.ListByLocation)
+
+	locGroup.GET("/services", serviceHandler.List)
+	locGroup.POST("/services", serviceHandler.Create)
+
+	// :serviceId routes additionally verify the service belongs to this
+	// location (RequireServiceInLocation) before anything else runs.
+	svcItemGroup := locGroup.Group("/services/:serviceId")
+	svcItemGroup.Use(handlers.RequireServiceInLocation(svcSvc))
+	svcItemGroup.GET("", serviceHandler.Get)
+	svcItemGroup.PUT("", serviceHandler.Update)
+	svcItemGroup.DELETE("", serviceHandler.Delete)
+	svcItemGroup.GET("/employees", assignmentHandler.ListForService)
+	svcItemGroup.POST("/employees", assignmentHandler.Assign)
+	svcItemGroup.DELETE("/employees/:employeeId", assignmentHandler.Unassign)
+
+	// :employeeId routes additionally verify the employee belongs to this
+	// location (RequireEmployeeInLocation) before anything else runs.
+	empItemGroup := locGroup.Group("/employees/:employeeId")
+	empItemGroup.Use(handlers.RequireEmployeeInLocation(empSvc))
+	empItemGroup.GET("/schedules", scheduleHandler.List)
+	empItemGroup.POST("/schedules", scheduleHandler.Create)
+	empItemGroup.DELETE("/schedules/:scheduleId", scheduleHandler.Delete)
+	empItemGroup.GET("/time-off", timeOffHandler.List)
+	empItemGroup.POST("/time-off", timeOffHandler.Create)
+	empItemGroup.DELETE("/time-off/:timeOffId", timeOffHandler.Delete)
+
+	// Bookings: propose/confirm are location-level (no booking exists yet);
+	// everything else is nested under a specific, already-owned booking via
+	// RequireBookingInLocation.
+	locGroup.POST("/bookings/propose", bookingHandler.Propose)
+	locGroup.POST("/bookings/confirm", bookingHandler.Confirm)
+	locGroup.GET("/bookings", bookingHandler.List)
+
+	bookingItemGroup := locGroup.Group("/bookings/:bookingId")
+	bookingItemGroup.Use(handlers.RequireBookingInLocation(bookingSvc))
+	bookingItemGroup.GET("", bookingHandler.Get)
+	bookingItemGroup.POST("/cancel", bookingHandler.Cancel)
+	bookingItemGroup.POST("/reschedule", bookingHandler.Reschedule)
+	bookingItemGroup.POST("/segments/:segmentId/cancel", bookingHandler.CancelSegment)
+
+	// FlowPOS sync feature: pulls locations + employees per tenant. See
+	// internal/modules/sync for the orchestration and internal/flowpos for
+	// the API client — instRepo is reused directly here since sync needs the
+	// raw api_key, which the installation *service* doesn't expose (its
+	// Installation JSON marshals APIKey as "-").
+	flowposClient := flowpos.NewClient(cfg.FlowposAPIURL)
+	syncSvc := sync.NewService(locRepo, empRepo, instRepo, flowposClient)
+	protected.POST("/sync/trigger", handlers.NewSyncHandler(syncSvc).Trigger)
+	syncScheduler := sync.NewScheduler(instRepo, syncSvc, cfg.SyncInterval)
+
+	return &Server{cfg: cfg, engine: r, SyncScheduler: syncScheduler}
 }
 
 // Run starts listening on the configured port.
 func (s *Server) Run() error {
 	return s.engine.Run(":" + s.cfg.Port)
+}
+
+// Handler exposes the underlying http.Handler for in-process HTTP testing
+// (httptest) without needing a real listening port — see
+// internal/server/ownership_test.go.
+func (s *Server) Handler() http.Handler {
+	return s.engine
 }
 
 // useJSONFieldNames makes the binding validator report a field's JSON name

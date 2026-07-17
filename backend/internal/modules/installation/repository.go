@@ -18,6 +18,27 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
+// ListInstalledTenantIDs returns every tenant currently marked installed —
+// used by the background sync scheduler (internal/modules/sync/scheduler.go)
+// to know which tenants to sync each run.
+func (r *Repository) ListInstalledTenantIDs() ([]uint64, error) {
+	rows, err := r.db.Query(`SELECT tenant_id FROM installations WHERE installed = TRUE`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []uint64
+	for rows.Next() {
+		var id uint64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func (r *Repository) GetByTenantID(tenantID uint64) (Installation, error) {
 	var in Installation
 	err := r.db.QueryRow(`

@@ -1,11 +1,13 @@
 import { NavLink } from "react-router-dom";
-import { CalendarDays } from "lucide-react";
+import { CalendarDays, Scissors, Users } from "lucide-react";
 import { cn } from "@/utils";
 
-// One entry per top-level page. Add to this list as real features (employees,
-// services, bookings...) get built — see app-bookings design doc for the
-// planned domain.
-const NAV = [{ to: "/", label: "Home", icon: CalendarDays }];
+// One entry per top-level page — see app-bookings design doc for the domain.
+const NAV = [
+  { to: "/", label: "Bookings", icon: CalendarDays },
+  { to: "/services", label: "Services", icon: Scissors },
+  { to: "/employees", label: "Employees", icon: Users },
+];
 
 export function AppNav() {
   return (

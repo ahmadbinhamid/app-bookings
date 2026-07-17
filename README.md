@@ -10,6 +10,19 @@ install/uninstall lifecycle, migrations engine, docker-compose stack, and a
 minimal "it's alive" page all work end to end. The actual domain (employees,
 services, bookings — see the app-bookings design doc) is not built yet.
 
+## Pre-release blockers
+
+Things that must be resolved before this ships to real tenants — not
+optional cleanup:
+
+- **`internal/flowpos/employees_unconfirmed.go`** — the `/employees`
+  endpoint path, its query params, and every field on the `Employee` struct
+  are invented, not confirmed against a real FlowPOS API response (unlike
+  `/locations`, which at least has prior art in the `quotes` app). All of
+  that guessing is isolated in this one file specifically so reconciling it
+  against a real response, once supplied, is a single-file change. Do not
+  ship without doing this.
+
 ## Layout
 
 ```
