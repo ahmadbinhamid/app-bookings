@@ -123,6 +123,22 @@ func (h *BookingHandler) CancelSegment(c *gin.Context) {
 	c.JSON(http.StatusOK, b)
 }
 
+// CompleteSegment handles PATCH /locations/:locationId/bookings/:bookingId/segments/:segmentId/complete.
+// Only valid from 'booked' — an already-cancelled or already-completed
+// segment is rejected with a clear error (see respondErr/errCode).
+func (h *BookingHandler) CompleteSegment(c *gin.Context) {
+	if err := h.bookings.CompleteSegment(bookingFrom(c).ID, c.Param("segmentId")); err != nil {
+		respondErr(c, err)
+		return
+	}
+	b, err := h.bookings.GetByID(bookingFrom(c).ID)
+	if err != nil {
+		respondErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, b)
+}
+
 // Reschedule handles POST /locations/:locationId/bookings/:bookingId/reschedule
 // — body is a fresh proposal (from Propose) for the new preferences.
 func (h *BookingHandler) Reschedule(c *gin.Context) {

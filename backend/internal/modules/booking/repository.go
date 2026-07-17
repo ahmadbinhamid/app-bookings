@@ -303,7 +303,7 @@ func (r *Repository) ListByLocation(locationID string, employeeID *string, from,
 	}
 	defer rows.Close()
 
-	var out []Booking
+	out := make([]Booking, 0)
 	for rows.Next() {
 		var b Booking
 		if err := rows.Scan(&b.ID, &b.LocationID, &b.CreatedByAdminID, &b.CustomerName, &b.CustomerPhone, &b.CustomerEmail, &b.Status, &b.WindowStart, &b.WindowEnd, &b.TotalPrice, &b.CreatedAt, &b.UpdatedAt); err != nil {

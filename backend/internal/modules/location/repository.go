@@ -103,7 +103,7 @@ func (r *Repository) ListByTenant(tenantID uint64) ([]Location, error) {
 	}
 	defer rows.Close()
 
-	var out []Location
+	out := make([]Location, 0)
 	for rows.Next() {
 		var l Location
 		if err := rows.Scan(&l.ID, &l.TenantID, &l.Name, &l.Timezone, &l.TimezoneConfirmed, &l.FlowposLocationID, &l.CreatedAt, &l.UpdatedAt); err != nil {

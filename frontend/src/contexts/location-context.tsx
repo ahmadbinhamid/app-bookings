@@ -32,7 +32,7 @@ export function LocationProvider({ children }: { children: ReactNode }) {
     }
   }, [locations, selectedLocationId]);
 
-  const selectedLocation = locations.find((l) => l.id === selectedLocationId);
+  const selectedLocation = (locations ?? []).find((l) => l.id === selectedLocationId);
 
   return (
     <LocationContext.Provider

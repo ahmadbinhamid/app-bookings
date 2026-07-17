@@ -4,8 +4,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
   Button, Badge,
 } from "@flowposltd/ui";
-import { X, RefreshCw } from "lucide-react";
-import { getBooking, cancelBooking, cancelBookingSegment, listEmployees, listServices } from "@/lib/api";
+import { X, Check, RefreshCw } from "lucide-react";
+import { getBooking, cancelBooking, cancelBookingSegment, completeBookingSegment, listEmployees, listServices } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type ApiError } from "@/lib/api/client";
 
@@ -69,6 +69,15 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
     onError: (err: ApiError) => toast.error(err.message),
   });
 
+  const completeSegmentMut = useMutation({
+    mutationFn: (segmentId: string) => completeBookingSegment(locationId, bookingId!, segmentId),
+    onSuccess: (b) => {
+      toast.success(b.status === "completed" ? "Booking completed" : "Marked as completed");
+      invalidate();
+    },
+    onError: (err: ApiError) => toast.error(err.message),
+  });
+
   if (!booking) return null;
 
   const activeServiceIds = (booking.segments ?? [])
@@ -114,15 +123,28 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
                   <p className="text-xs text-content-secondary">${seg.price.toFixed(2)}</p>
                 </div>
                 {seg.status === "booked" && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-7"
-                    onClick={() => cancelSegmentMut.mutate(seg.id)}
-                    disabled={cancelSegmentMut.isPending}
-                  >
-                    <X className="size-3.5" />
-                  </Button>
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      title="Mark completed"
+                      onClick={() => completeSegmentMut.mutate(seg.id)}
+                      disabled={completeSegmentMut.isPending || cancelSegmentMut.isPending}
+                    >
+                      <Check className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      title="Cancel this service"
+                      onClick={() => cancelSegmentMut.mutate(seg.id)}
+                      disabled={cancelSegmentMut.isPending || completeSegmentMut.isPending}
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  </>
                 )}
               </div>
             </div>

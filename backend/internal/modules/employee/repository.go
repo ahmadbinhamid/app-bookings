@@ -132,7 +132,7 @@ func (r *Repository) ListByLocation(locationID string) ([]Employee, error) {
 	}
 	defer rows.Close()
 
-	var out []Employee
+	out := make([]Employee, 0)
 	for rows.Next() {
 		var e Employee
 		var email, phone sql.NullString

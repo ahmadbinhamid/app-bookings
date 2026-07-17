@@ -36,6 +36,16 @@ export async function cancelBookingSegment(locationId: string, bookingId: string
   return res.data;
 }
 
+// Only valid from a 'booked' segment — the backend rejects an already-
+// cancelled or already-completed one with a clear error. Once every segment
+// on the booking is completed-or-cancelled (with at least one completed),
+// the booking itself auto-transitions to 'completed' — there's no separate
+// "complete the booking" action.
+export async function completeBookingSegment(locationId: string, bookingId: string, segmentId: string): Promise<Booking> {
+  const res = await apiClient.patch<Booking>(`/locations/${locationId}/bookings/${bookingId}/segments/${segmentId}/complete`);
+  return res.data;
+}
+
 export async function rescheduleBooking(locationId: string, bookingId: string, input: RescheduleInput): Promise<Booking> {
   const res = await apiClient.post<Booking>(`/locations/${locationId}/bookings/${bookingId}/reschedule`, input);
   return res.data;

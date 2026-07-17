@@ -150,6 +150,7 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	bookingItemGroup.POST("/cancel", bookingHandler.Cancel)
 	bookingItemGroup.POST("/reschedule", bookingHandler.Reschedule)
 	bookingItemGroup.POST("/segments/:segmentId/cancel", bookingHandler.CancelSegment)
+	bookingItemGroup.PATCH("/segments/:segmentId/complete", bookingHandler.CompleteSegment)
 
 	// FlowPOS sync feature: pulls locations + employees per tenant. See
 	// internal/modules/sync for the orchestration and internal/flowpos for

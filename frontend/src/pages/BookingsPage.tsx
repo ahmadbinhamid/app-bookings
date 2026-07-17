@@ -1,16 +1,27 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Badge, Button,
+  Badge, Button, Input,
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from "@flowposltd/ui";
-import { Plus, CalendarDays } from "lucide-react";
+import { Plus, CalendarDays, X } from "lucide-react";
 import { listBookings, listEmployees, listServices } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FormField } from "@/components/ui/form-field";
 import { BookingWizard } from "@/components/bookings/booking-wizard";
 import { BookingDetailDialog } from "@/components/bookings/booking-detail-dialog";
 import { useLocationContext } from "@/contexts/location-context";
+
+// "YYYY-MM-DD" (from a native date input) → start/end-of-day ISO instants
+// in the browser's local time, matching what the backend's from/to query
+// params expect (RFC3339).
+function startOfDayISO(dateStr: string): string {
+  return new Date(`${dateStr}T00:00:00`).toISOString();
+}
+function endOfDayISO(dateStr: string): string {
+  return new Date(`${dateStr}T23:59:59.999`).toISOString();
+}
 
 const STATUS_VARIANT: Record<string, "status-success" | "secondary" | "destructive"> = {
   confirmed: "status-success",
@@ -24,10 +35,15 @@ export default function BookingsPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [rescheduling, setRescheduling] = useState<{ bookingId: string; serviceIds: string[] } | undefined>();
   const [viewingBookingId, setViewingBookingId] = useState<string | undefined>();
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  const from = fromDate ? startOfDayISO(fromDate) : undefined;
+  const to = toDate ? endOfDayISO(toDate) : undefined;
 
   const { data: bookings = [], isLoading } = useQuery({
-    queryKey: selectedLocationId ? queryKeys.bookings(selectedLocationId) : ["bookings", "none"],
-    queryFn: () => listBookings(selectedLocationId!),
+    queryKey: selectedLocationId ? [...queryKeys.bookings(selectedLocationId), from, to] : ["bookings", "none"],
+    queryFn: () => listBookings(selectedLocationId!, { from, to }),
     enabled: Boolean(selectedLocationId),
   });
 
@@ -72,6 +88,21 @@ export default function BookingsPage() {
           <Plus className="size-4" />
           New Booking
         </Button>
+      </div>
+
+      <div className="flex items-end gap-3">
+        <FormField label="From" className="w-40">
+          <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+        </FormField>
+        <FormField label="To" className="w-40">
+          <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        </FormField>
+        {(fromDate || toDate) && (
+          <Button variant="ghost" size="sm" onClick={() => { setFromDate(""); setToDate(""); }}>
+            <X className="size-3.5" />
+            Clear
+          </Button>
+        )}
       </div>
 
       {isLoading ? (

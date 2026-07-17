@@ -3,7 +3,7 @@ import { type Schedule, type ScheduleInput } from "@/types";
 
 export async function listSchedules(locationId: string, employeeId: string): Promise<Schedule[]> {
   const res = await apiClient.get<{ schedules: Schedule[] }>(`/locations/${locationId}/employees/${employeeId}/schedules`);
-  return res.data.schedules;
+  return res.data.schedules ?? [];
 }
 
 export async function createSchedule(locationId: string, employeeId: string, input: ScheduleInput): Promise<Schedule> {

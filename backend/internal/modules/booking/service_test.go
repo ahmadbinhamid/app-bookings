@@ -244,7 +244,7 @@ func TestCancelBooking_CascadesToAllSegments(t *testing.T) {
 	}
 }
 
-func TestCancelBooking_WithCompletedSegment_StaysConfirmed(t *testing.T) {
+func TestCancelBooking_WithCompletedSegment_BookingBecomesCompleted(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID := seedLocationTZ(t, conn, "UTC", true)
@@ -266,10 +266,10 @@ func TestCancelBooking_WithCompletedSegment_StaysConfirmed(t *testing.T) {
 		t.Fatalf("Confirm: %v", err)
 	}
 
-	// Simulate the haircut having already been completed (no dedicated
-	// "complete" endpoint exists yet — see final report's flagged gap).
-	if _, err := conn.Exec(`UPDATE booking_segments SET status = 'completed' WHERE id = ?`, b.Segments[0].ID); err != nil {
-		t.Fatalf("mark completed: %v", err)
+	// The haircut has already been delivered — mark it completed through
+	// the real endpoint, not a raw-SQL shim.
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("CompleteSegment: %v", err)
 	}
 
 	if err := svc.CancelBooking(b.ID); err != nil {
@@ -280,12 +280,11 @@ func TestCancelBooking_WithCompletedSegment_StaysConfirmed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	// The rule: booking becomes 'cancelled' only when ALL segments are
-	// cancelled. One is 'completed' (never touched by cancel), so the
-	// booking must stay 'confirmed' even though the admin just clicked
-	// "cancel booking."
-	if after.Status != "confirmed" {
-		t.Fatalf("expected booking to stay confirmed (one segment completed), got %q", after.Status)
+	// The rule: every segment is now completed-or-cancelled, with at least
+	// one actually completed (the haircut) — the booking auto-transitions
+	// to 'completed', not 'cancelled' and not 'confirmed'.
+	if after.Status != "completed" {
+		t.Fatalf("expected booking to become completed (one segment completed, one cancelled), got %q", after.Status)
 	}
 	var completedCount, cancelledCount int
 	for _, s := range after.Segments {
@@ -363,6 +362,137 @@ func TestCancelSegment_AlreadyCancelled_Rejected(t *testing.T) {
 	}
 	if err := svc.CancelSegment(b.ID, b.Segments[0].ID); err != ErrAlreadyCancelled {
 		t.Fatalf("expected ErrAlreadyCancelled, got %v", err)
+	}
+}
+
+// --- Complete ---
+
+func TestCompleteSegment_HappyPath_OtherSegmentStillBooked_BookingStaysConfirmed(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID := seedLocationTZ(t, conn, "UTC", true)
+	barber := seedEmployeeAt(t, conn, locID, "Barber A")
+	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
+	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
+	seedAssignment(t, conn, barber, haircut)
+	seedAssignment(t, conn, barber, facial)
+
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments: []ProposedSegment{
+			{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25},
+			{ServiceID: facial, EmployeeID: barber, Start: start.Add(40 * time.Minute), End: start.Add(70 * time.Minute), BlockedUntil: start.Add(80 * time.Minute), Price: 40},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("CompleteSegment: %v", err)
+	}
+
+	after, err := svc.GetByID(b.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if after.Segments[0].Status != "completed" {
+		t.Fatalf("expected haircut segment completed, got %q", after.Segments[0].Status)
+	}
+	if after.Segments[1].Status != "booked" {
+		t.Fatalf("expected facial segment to remain booked, got %q", after.Segments[1].Status)
+	}
+	// One segment is still just 'booked' (not completed, not cancelled) —
+	// the booking must stay 'confirmed', not jump to 'completed' early.
+	if after.Status != "confirmed" {
+		t.Fatalf("expected booking to stay confirmed while a segment is still booked, got %q", after.Status)
+	}
+}
+
+func TestCompleteSegment_LastRemainingSegment_BookingBecomesCompleted(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("CompleteSegment: %v", err)
+	}
+
+	after, err := svc.GetByID(b.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if after.Status != "completed" {
+		t.Fatalf("expected a single-segment booking to become completed once its only segment is, got %q", after.Status)
+	}
+}
+
+func TestCompleteSegment_AlreadyCompleted_Rejected(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("first complete: %v", err)
+	}
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != ErrAlreadyCompleted {
+		t.Fatalf("expected ErrAlreadyCompleted, got %v", err)
+	}
+}
+
+func TestCompleteSegment_AlreadyCancelled_Rejected(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if err := svc.CancelSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != ErrAlreadyCancelled {
+		t.Fatalf("expected ErrAlreadyCancelled, got %v", err)
+	}
+}
+
+func TestCancelBooking_AlreadyCompleted_Rejected(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if err := svc.CompleteSegment(b.ID, b.Segments[0].ID); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if err := svc.CancelBooking(b.ID); err != ErrAlreadyCompleted {
+		t.Fatalf("expected ErrAlreadyCompleted, got %v", err)
 	}
 }
 

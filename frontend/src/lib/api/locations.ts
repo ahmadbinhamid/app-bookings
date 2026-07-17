@@ -3,7 +3,7 @@ import { type Location } from "@/types";
 
 export async function listLocations(): Promise<Location[]> {
   const res = await apiClient.get<{ locations: Location[] }>("/locations");
-  return res.data.locations;
+  return res.data.locations ?? [];
 }
 
 export async function setLocationTimezone(locationId: string, timezone: string): Promise<Location> {

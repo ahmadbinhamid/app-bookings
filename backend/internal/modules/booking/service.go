@@ -133,21 +133,45 @@ func computeWindow(segments []ProposedSegment) (start, end time.Time, total floa
 	return start, end, total
 }
 
-// recomputeStatus is the shared rule behind both CancelBooking and
-// CancelSegment: "the booking becomes 'cancelled' only when ALL its
-// segments are cancelled — it stays 'confirmed' for any mixed state in
-// between" (design doc, Status rules). Notably this means "cancel the
-// whole booking" does NOT force status to 'cancelled' if any segment was
-// already 'completed' — that segment isn't cancelled, so not all segments
-// are, so the rule correctly keeps the booking 'confirmed'. That's the
-// literal, intended consequence of the rule, not a bug.
+// recomputeStatus is the single shared rule behind CancelBooking,
+// CancelSegment, and CompleteSegment — every place a segment's status
+// changes re-derives the booking's status from scratch rather than special-
+// casing each transition:
+//
+//   - every segment cancelled                      → booking 'cancelled'
+//   - every segment completed-or-cancelled,
+//     with at least one actually completed          → booking 'completed'
+//   - anything else (at least one still 'booked')    → booking 'confirmed'
+//
+// "Cancel the whole booking" does NOT force status to 'cancelled' if a
+// segment was already 'completed' — that segment isn't cancelled, so the
+// first rule doesn't fire; the second rule does instead (every segment is
+// now completed-or-cancelled, and at least one is completed), so the
+// booking correctly becomes 'completed', not 'confirmed' or 'cancelled'.
 func recomputeStatus(segments []Segment) string {
+	allCancelled := true
+	anyCompleted := false
+	anyStillBooked := false
 	for _, s := range segments {
-		if s.Status != "cancelled" {
-			return "confirmed"
+		switch s.Status {
+		case "cancelled":
+			// allCancelled stays true unless another segment breaks it.
+		case "completed":
+			allCancelled = false
+			anyCompleted = true
+		case "booked":
+			allCancelled = false
+			anyStillBooked = true
 		}
 	}
-	return "cancelled"
+	switch {
+	case allCancelled:
+		return "cancelled"
+	case !anyStillBooked && anyCompleted:
+		return "completed"
+	default:
+		return "confirmed"
+	}
 }
 
 // Confirm is confirmBooking from the design doc: pairwise self-check, then
@@ -282,6 +306,57 @@ func (s *Service) CancelSegment(bookingID, segmentID string) error {
 	}
 
 	if err := s.repo.UpdateSegmentStatus(tx, segmentID, "cancelled"); err != nil {
+		return err
+	}
+
+	allSegments, err := s.repo.SegmentsForBooking(tx, bookingID, false)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.UpdateBookingStatus(tx, bookingID, recomputeStatus(allSegments)); err != nil {
+		return err
+	}
+	if err := s.repo.RecomputeBookingWindowAndTotal(tx, bookingID); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// CompleteSegment marks one segment as actually delivered — only valid from
+// 'booked' (rejects an already-cancelled or already-completed segment with
+// a clear error rather than silently no-opping). Locks the parent booking
+// row first, same reasoning as CancelSegment: this can't interleave with a
+// concurrent cancel/reschedule of the same booking. Once every segment is
+// completed-or-cancelled (with at least one actually completed), the
+// booking itself auto-transitions to 'completed' via recomputeStatus — no
+// separate "complete the booking" action exists or is needed.
+func (s *Service) CompleteSegment(bookingID, segmentID string) error {
+	tx, err := s.repo.BeginTx()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	if _, err := s.repo.LockBookingForUpdate(tx, bookingID); err != nil {
+		return err
+	}
+
+	seg, err := s.repo.GetSegment(tx, segmentID)
+	if err != nil {
+		return err
+	}
+	if seg.BookingID != bookingID {
+		return ErrSegmentNotFound
+	}
+	if seg.Status == "cancelled" {
+		return ErrAlreadyCancelled
+	}
+	if seg.Status == "completed" {
+		return ErrAlreadyCompleted
+	}
+
+	if err := s.repo.UpdateSegmentStatus(tx, segmentID, "completed"); err != nil {
 		return err
 	}
 

@@ -36,7 +36,7 @@ export async function deleteService(locationId: string, serviceId: string): Prom
 
 export async function listAssignedEmployees(locationId: string, serviceId: string): Promise<Employee[]> {
   const res = await apiClient.get<{ employees: Employee[] }>(`/locations/${locationId}/services/${serviceId}/employees`);
-  return res.data.employees;
+  return res.data.employees ?? [];
 }
 
 export async function assignEmployee(locationId: string, serviceId: string, employeeId: string): Promise<void> {
