@@ -74,9 +74,12 @@ func envelope(w http.ResponseWriter, payload any) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": payload, "status": true})
 }
 
-// --- Fake FlowPOS server: two locations, each with employees ---
+// --- Fake FlowPOS server: two fixed locations; a single tenant-wide
+// employee list, since FlowPOS has no employee-to-location scoping
+// (confirmed against flowpos-backend's EmployeeController) — every location
+// gets the same list synced under its own location_id. ---
 
-func fakeFlowposServer(t *testing.T, employeesByLocation map[string][]map[string]any) *httptest.Server {
+func fakeFlowposServer(t *testing.T, employees []map[string]any) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/locations", func(w http.ResponseWriter, r *http.Request) {
@@ -88,26 +91,27 @@ func fakeFlowposServer(t *testing.T, employeesByLocation map[string][]map[string
 		})
 	})
 	mux.HandleFunc("/employees", func(w http.ResponseWriter, r *http.Request) {
-		locationID := r.URL.Query().Get("location_id")
-		envelope(w, map[string]any{"employees": employeesByLocation[locationID]})
+		envelope(w, map[string]any{
+			"employees": map[string]any{
+				"data":         employees,
+				"current_page": 1,
+				"last_page":    1,
+				"total":        len(employees),
+			},
+		})
 	})
 	return httptest.NewServer(mux)
 }
 
-func TestSyncTenant_TwoLocationsTwoEmployeesEach_CreatesEverythingOnce(t *testing.T) {
+func TestSyncTenant_TwoLocations_TenantEmployeesAppliedToEachLocation(t *testing.T) {
 	conn := connectOrSkip(t)
 	instRepo := installation.NewRepository(conn)
 	locRepo := location.NewRepository(conn)
 	empRepo := employee.NewRepository(conn)
 
-	server := fakeFlowposServer(t, map[string][]map[string]any{
-		"1": {
-			{"id": 101, "name": "Alice", "email": "alice@example.com"},
-			{"id": 102, "name": "Bob"},
-		},
-		"2": {
-			{"id": 201, "name": "Carol"},
-		},
+	server := fakeFlowposServer(t, []map[string]any{
+		{"id": 101, "name": "Alice", "email": "alice@example.com"},
+		{"id": 102, "name": "Bob"},
 	})
 	defer server.Close()
 
@@ -124,8 +128,10 @@ func TestSyncTenant_TwoLocationsTwoEmployeesEach_CreatesEverythingOnce(t *testin
 	if summary.LocationsSynced != 2 {
 		t.Fatalf("expected 2 locations synced, got %d", summary.LocationsSynced)
 	}
-	if summary.EmployeesSynced != 3 {
-		t.Fatalf("expected 3 employees synced, got %d", summary.EmployeesSynced)
+	// FlowPOS has no location scoping for employees, so both employees are
+	// upserted at both locations: 2 employees x 2 locations = 4.
+	if summary.EmployeesSynced != 4 {
+		t.Fatalf("expected 4 employees synced (2 employees x 2 locations), got %d", summary.EmployeesSynced)
 	}
 	if len(summary.LocationErrors) != 0 {
 		t.Fatalf("expected no location errors, got %v", summary.LocationErrors)
@@ -138,6 +144,15 @@ func TestSyncTenant_TwoLocationsTwoEmployeesEach_CreatesEverythingOnce(t *testin
 	if len(locs) != 2 {
 		t.Fatalf("expected 2 location rows in DB, got %d", len(locs))
 	}
+	for _, loc := range locs {
+		emps, err := empRepo.ListByLocation(loc.ID)
+		if err != nil {
+			t.Fatalf("ListByLocation: %v", err)
+		}
+		if len(emps) != 2 {
+			t.Fatalf("location %s: expected both tenant employees present, got %d", loc.FlowposLocationID, len(emps))
+		}
+	}
 }
 
 func TestSyncTenant_RunTwice_DoesNotDuplicate(t *testing.T) {
@@ -146,9 +161,8 @@ func TestSyncTenant_RunTwice_DoesNotDuplicate(t *testing.T) {
 	locRepo := location.NewRepository(conn)
 	empRepo := employee.NewRepository(conn)
 
-	server := fakeFlowposServer(t, map[string][]map[string]any{
-		"1": {{"id": 101, "name": "Alice"}, {"id": 102, "name": "Bob"}},
-		"2": {{"id": 201, "name": "Carol"}},
+	server := fakeFlowposServer(t, []map[string]any{
+		{"id": 101, "name": "Alice"}, {"id": 102, "name": "Bob"}, {"id": 201, "name": "Carol"},
 	})
 	defer server.Close()
 
@@ -175,12 +189,8 @@ func TestSyncTenant_RunTwice_DoesNotDuplicate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListByLocation: %v", err)
 		}
-		wantCount := 2
-		if loc.FlowposLocationID == "2" {
-			wantCount = 1
-		}
-		if len(emps) != wantCount {
-			t.Fatalf("location %s: expected %d employee rows after two syncs, got %d (duplicates created)", loc.FlowposLocationID, wantCount, len(emps))
+		if len(emps) != 3 {
+			t.Fatalf("location %s: expected 3 employee rows after two syncs, got %d (duplicates created)", loc.FlowposLocationID, len(emps))
 		}
 	}
 }
@@ -192,10 +202,7 @@ func TestSyncTenant_NewEmployeeAppears(t *testing.T) {
 	empRepo := employee.NewRepository(conn)
 	tenantID := seedInstallation(t, instRepo)
 
-	employees := map[string][]map[string]any{
-		"1": {{"id": 101, "name": "Alice"}},
-		"2": {},
-	}
+	employees := []map[string]any{{"id": 101, "name": "Alice"}}
 	server := fakeFlowposServer(t, employees)
 	svc := sync.NewService(locRepo, empRepo, instRepo, flowpos.NewClient(server.URL))
 	if _, err := svc.SyncTenant(context.Background(), tenantID); err != nil {
@@ -203,8 +210,8 @@ func TestSyncTenant_NewEmployeeAppears(t *testing.T) {
 	}
 	server.Close()
 
-	// FlowPOS now also has a second employee at location 1.
-	employees["1"] = append(employees["1"], map[string]any{"id": 103, "name": "New Hire"})
+	// FlowPOS now also has a second employee, tenant-wide.
+	employees = append(employees, map[string]any{"id": 103, "name": "New Hire"})
 	server2 := fakeFlowposServer(t, employees)
 	defer server2.Close()
 	svc2 := sync.NewService(locRepo, empRepo, instRepo, flowpos.NewClient(server2.URL))
@@ -213,10 +220,11 @@ func TestSyncTenant_NewEmployeeAppears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	// EmployeesSynced counts every employee upserted this run (Alice again
-	// plus the new hire), not just newly-created rows.
-	if summary.EmployeesSynced != 2 {
-		t.Fatalf("expected 2 employees synced at location 1 on the second run (existing + new), got %d", summary.EmployeesSynced)
+	// EmployeesSynced counts every employee upserted this run across both
+	// locations (Alice again plus the new hire, x2 locations), not just
+	// newly-created rows.
+	if summary.EmployeesSynced != 4 {
+		t.Fatalf("expected 4 employees synced on the second run (2 employees x 2 locations), got %d", summary.EmployeesSynced)
 	}
 
 	loc, err := locRepo.GetByTenantAndFlowposID(tenantID, "1")
@@ -239,10 +247,7 @@ func TestSyncTenant_RemovedEmployee_DeactivatedNotDeleted_BookingSegmentUntouche
 	empRepo := employee.NewRepository(conn)
 	tenantID := seedInstallation(t, instRepo)
 
-	employees := map[string][]map[string]any{
-		"1": {{"id": 101, "name": "Alice"}},
-		"2": {},
-	}
+	employees := []map[string]any{{"id": 101, "name": "Alice"}}
 	server := fakeFlowposServer(t, employees)
 	svc := sync.NewService(locRepo, empRepo, instRepo, flowpos.NewClient(server.URL))
 	if _, err := svc.SyncTenant(context.Background(), tenantID); err != nil {
@@ -265,8 +270,9 @@ func TestSyncTenant_RemovedEmployee_DeactivatedNotDeleted_BookingSegmentUntouche
 	// application code under test.
 	svcID, bookingID := seedServiceAndBooking(t, conn, loc.ID, alice.ID)
 
-	// FlowPOS no longer returns Alice at location 1.
-	employees["1"] = nil
+	// FlowPOS no longer returns Alice at all (tenant-wide, so she disappears
+	// from every location at once).
+	employees = nil
 	server2 := fakeFlowposServer(t, employees)
 	defer server2.Close()
 	svc2 := sync.NewService(locRepo, empRepo, instRepo, flowpos.NewClient(server2.URL))
@@ -275,8 +281,9 @@ func TestSyncTenant_RemovedEmployee_DeactivatedNotDeleted_BookingSegmentUntouche
 	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	if summary.EmployeesDeactivated != 1 {
-		t.Fatalf("expected 1 employee deactivated, got %d", summary.EmployeesDeactivated)
+	// Alice is deactivated at both locations (1 per location x 2 locations).
+	if summary.EmployeesDeactivated != 2 {
+		t.Fatalf("expected 2 employees deactivated (1 per location), got %d", summary.EmployeesDeactivated)
 	}
 
 	aliceAfter, err := empRepo.GetByLocationAndFlowposID(loc.ID, "101")
@@ -310,13 +317,10 @@ func TestSyncTenant_MalformedEmployeeRecord_SkippedNotCrashed(t *testing.T) {
 	empRepo := employee.NewRepository(conn)
 	tenantID := seedInstallation(t, instRepo)
 
-	server := fakeFlowposServer(t, map[string][]map[string]any{
-		"1": {
-			{"id": 101, "name": "Alice"},
-			{"id": "", "name": "Missing Id"}, // malformed: no id
-			{"id": 104, "name": ""},          // malformed: no name
-		},
-		"2": {},
+	server := fakeFlowposServer(t, []map[string]any{
+		{"id": 101, "name": "Alice"},
+		{"id": "", "name": "Missing Id"}, // malformed: no id
+		{"id": 104, "name": ""},          // malformed: no name
 	})
 	defer server.Close()
 
@@ -325,8 +329,9 @@ func TestSyncTenant_MalformedEmployeeRecord_SkippedNotCrashed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected malformed rows to be skipped, not to fail the sync: %v", err)
 	}
-	if summary.EmployeesSynced != 1 {
-		t.Fatalf("expected exactly 1 valid employee synced (malformed rows skipped), got %d", summary.EmployeesSynced)
+	// 1 valid employee per location x 2 locations (malformed rows skipped at each).
+	if summary.EmployeesSynced != 2 {
+		t.Fatalf("expected exactly 2 valid employees synced (malformed rows skipped), got %d", summary.EmployeesSynced)
 	}
 }
 
@@ -342,10 +347,14 @@ func TestSyncTenant_LocationsEndpointMissing_FallsBackToSingleLocation(t *testin
 		http.NotFound(w, r) // simulates a FlowPOS install with no locations endpoint at all
 	})
 	mux.HandleFunc("/employees", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("location_id") != "" {
-			t.Fatalf("fallback mode must fetch employees unfiltered by location, got location_id=%q", r.URL.Query().Get("location_id"))
-		}
-		envelope(w, map[string]any{"employees": []map[string]any{{"id": 301, "name": "Only Employee"}}})
+		envelope(w, map[string]any{
+			"employees": map[string]any{
+				"data":         []map[string]any{{"id": 301, "name": "Only Employee"}},
+				"current_page": 1,
+				"last_page":    1,
+				"total":        1,
+			},
+		})
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()

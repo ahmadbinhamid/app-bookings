@@ -122,7 +122,10 @@ func (s *Service) resolveLocations(ctx context.Context, tenantID uint64, apiKey 
 }
 
 func (s *Service) syncEmployeesForLocation(ctx context.Context, sl syncedLocation, apiKey string) (synced int, deactivated int64, err error) {
-	flowposEmployees, err := s.flowposClient.ListEmployees(ctx, apiKey, sl.flowposLocationID)
+	// FlowPOS has no employee-to-location scoping (confirmed against
+	// flowpos-backend's EmployeeController), so every location gets the
+	// tenant's full employee list upserted under its own location_id.
+	flowposEmployees, err := s.flowposClient.ListEmployees(ctx, apiKey)
 	if err != nil {
 		return 0, 0, err
 	}
