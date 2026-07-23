@@ -2,10 +2,13 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Button, Input } from "@flowposltd/ui";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Palmtree } from "lucide-react";
 import { FormField } from "@/components/ui/form-field";
+import { DatePopover } from "@/components/ui/calendar-popover";
+import { TimePopover } from "@/components/ui/time-popover";
 import { listTimeOff, createTimeOff, deleteTimeOff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { combineDateAndMinutes, toISODateLocal } from "@/utils";
 
 interface EmployeeTimeOffEditorProps {
   locationId: string;
@@ -21,20 +24,24 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
     queryFn: () => listTimeOff(locationId, employeeId),
   });
 
-  const [start, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const today = toISODateLocal(new Date());
+  const [startDate, setStartDate] = useState(today);
+  const [startMinutes, setStartMinutes] = useState(0);
+  const [endDate, setEndDate] = useState(today);
+  const [endMinutes, setEndMinutes] = useState(24 * 60 - 15);
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
 
   const createMut = useMutation({
     mutationFn: () => createTimeOff(locationId, employeeId, {
-      start_datetime: new Date(start).toISOString(),
-      end_datetime: new Date(end).toISOString(),
+      start_datetime: combineDateAndMinutes(startDate, startMinutes),
+      end_datetime: combineDateAndMinutes(endDate, endMinutes),
       reason: reason || undefined,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: key });
-      setStart(""); setEnd(""); setReason(""); setError("");
+      setReason("");
+      setError("");
     },
     onError: (err: Error) => setError(err.message),
   });
@@ -46,55 +53,63 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
   });
 
   function handleAdd() {
-    if (!start || !end) {
-      setError("Both a start and end are required");
-      return;
-    }
+    setError("");
     createMut.mutate();
   }
 
   return (
     <div className="flex flex-col gap-4">
       {isLoading ? (
-        <p className="text-sm text-content-secondary">Loading…</p>
+        <p className="text-body-2 text-content-secondary">Loading…</p>
       ) : timeOff.length === 0 ? (
-        <p className="text-sm text-content-secondary italic">No time off scheduled.</p>
+        <p className="text-body-2 text-content-secondary italic">No time off scheduled.</p>
       ) : (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2.5">
           {timeOff.map((t) => (
-            <div key={t.id} className="flex items-center justify-between rounded-sm bg-muted px-3 py-2 text-sm">
-              <div>
-                <span className="tabular-nums">
-                  {new Date(t.start_datetime).toLocaleString()} – {new Date(t.end_datetime).toLocaleString()}
-                </span>
-                {t.reason && <span className="text-content-secondary ml-2">({t.reason})</span>}
+            <div key={t.id} className="flex items-center gap-3.5 rounded-md border border-border p-3.5">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">
+                <Palmtree className="size-4.5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-body-2 text-foreground">
+                  {new Date(t.start_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                  {" – "}
+                  {new Date(t.end_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                </div>
+                {t.reason && <div className="text-body-3 text-content-secondary mt-0.5">{t.reason}</div>}
               </div>
               <button
                 onClick={() => deleteMut.mutate(t.id)}
-                className="text-content-secondary hover:text-destructive transition-colors"
+                className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border text-content-tertiary hover:border-destructive/30 hover:bg-destructive/5 hover:text-destructive transition-colors"
               >
-                <Trash2 className="size-3.5" />
+                <Trash2 className="size-4" />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      <div className="rounded-sm border border-border p-3 flex flex-col gap-3">
-        <p className="text-xs font-medium text-content-secondary uppercase tracking-wide">Add time off</p>
-        <div className="grid grid-cols-2 gap-2">
+      <div className="rounded-md border border-border p-4 flex flex-col gap-3.5">
+        <p className="text-body-3 font-medium text-content-tertiary uppercase tracking-wide">Add time off</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField label="Start">
-            <Input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} />
+            <div className="flex gap-2">
+              <DatePopover value={startDate} onChange={setStartDate} />
+              <TimePopover value={startMinutes} onChange={setStartMinutes} />
+            </div>
           </FormField>
           <FormField label="End">
-            <Input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <div className="flex gap-2">
+              <DatePopover value={endDate} onChange={setEndDate} />
+              <TimePopover value={endMinutes} onChange={setEndMinutes} />
+            </div>
           </FormField>
         </div>
         <FormField label="Reason" hint="Optional">
           <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Annual leave" />
         </FormField>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <Button size="sm" onClick={handleAdd} loading={createMut.isPending}>
+        {error && <p className="text-body-3 text-destructive">{error}</p>}
+        <Button size="sm" onClick={handleAdd} loading={createMut.isPending} className="self-start">
           <Plus className="size-3.5" />
           Add time off
         </Button>

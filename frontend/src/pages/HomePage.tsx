@@ -28,13 +28,13 @@ export default function HomePage() {
         {isLoading && <Skeleton className="h-5 w-64" />}
 
         {isError && (
-          <p className="text-sm text-destructive">
+          <p className="text-body-2 text-destructive">
             Could not reach the API — is the backend running?
           </p>
         )}
 
         {data && (
-          <p className="text-sm">
+          <p className="text-body-2">
             {data.installation
               ? `Installed for tenant ${data.installation.tenant_id} (installed: ${String(
                   data.installation.installed

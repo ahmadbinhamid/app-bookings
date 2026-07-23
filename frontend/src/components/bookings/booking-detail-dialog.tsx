@@ -4,10 +4,15 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
   Button, Badge,
 } from "@flowposltd/ui";
-import { X, Check, RefreshCw } from "lucide-react";
+import { X, Check, RefreshCw, CalendarOff } from "lucide-react";
 import { getBooking, cancelBooking, cancelBookingSegment, completeBookingSegment, listEmployees, listServices } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type ApiError } from "@/lib/api/client";
+import { PersonAvatar } from "@/components/ui/person-avatar";
+import { BookingTimeline } from "@/components/ui/booking-timeline";
+import { BOOKING_STATUS } from "@/constants";
+import { serviceVisual } from "@/constants/service-visuals";
+import { cn, formatMoney, formatTimeRange, buildTimeline } from "@/utils";
 
 interface BookingDetailDialogProps {
   open: boolean;
@@ -16,13 +21,6 @@ interface BookingDetailDialogProps {
   bookingId: string | undefined;
   onReschedule: (bookingId: string, serviceIds: string[]) => void;
 }
-
-const STATUS_VARIANT: Record<string, "status-success" | "secondary" | "destructive"> = {
-  confirmed: "status-success",
-  completed: "secondary",
-  cancelled: "destructive",
-  pending: "secondary",
-};
 
 export function BookingDetailDialog({ open, onClose, locationId, bookingId, onReschedule }: BookingDetailDialogProps) {
   const qc = useQueryClient();
@@ -80,81 +78,143 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
 
   if (!booking) return null;
 
-  const activeServiceIds = (booking.segments ?? [])
-    .filter((s) => s.status !== "cancelled")
-    .map((s) => s.service_id);
+  const segments = booking.segments ?? [];
+  const activeSegments = segments.filter((s) => s.status !== "cancelled");
+  const activeServiceIds = activeSegments.map((s) => s.service_id);
+  const isEmpty = activeSegments.length === 0;
+  const status = BOOKING_STATUS[booking.status];
+
+  const timeline = !isEmpty
+    ? buildTimeline(
+        activeSegments.map((s) => ({
+          key: s.id,
+          name: serviceByID.get(s.service_id)?.name ?? s.service_id,
+          start: s.start_time,
+          end: s.end_time,
+        }))
+      )
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            {booking.customer_name}
-            <Badge variant={STATUS_VARIANT[booking.status] ?? "secondary"}>{booking.status}</Badge>
-          </DialogTitle>
-          <DialogDescription>
-            {booking.customer_phone}
-            {booking.customer_phone && booking.customer_email && " · "}
-            {booking.customer_email}
-          </DialogDescription>
+          <div className="flex items-start gap-3.5">
+            <PersonAvatar name={booking.customer_name} size="lg" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2.5">
+                <DialogTitle>{booking.customer_name}</DialogTitle>
+                <Badge variant={status.badgeVariant} dotColor={status.dotClass}>{status.label}</Badge>
+              </div>
+              <DialogDescription>
+                {booking.customer_phone}
+                {booking.customer_phone && booking.customer_email && " · "}
+                {booking.customer_email}
+              </DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="flex flex-col gap-2 py-2">
-          {(booking.segments ?? []).map((seg) => (
-            <div
-              key={seg.id}
-              className={`flex items-center justify-between rounded-sm border border-border p-3 ${seg.status === "cancelled" ? "opacity-50" : ""}`}
-            >
-              <div>
-                <p className="font-medium text-foreground">
-                  {serviceByID.get(seg.service_id)?.name ?? seg.service_id}
-                  {seg.status === "cancelled" && <span className="text-content-secondary font-normal"> (cancelled)</span>}
-                  {seg.status === "completed" && <span className="text-content-secondary font-normal"> (completed)</span>}
-                </p>
-                <p className="text-xs text-content-secondary">{employeeByID.get(seg.employee_id)?.name ?? seg.employee_id}</p>
+        <DialogBodyContent>
+          {isEmpty ? (
+            <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border bg-muted/30 p-8 text-center">
+              <div className="flex size-12 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+                <CalendarOff className="size-6" />
               </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <p className="tabular-nums text-sm">
-                    {new Date(seg.start_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {" – "}
-                    {new Date(seg.end_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                  </p>
-                  <p className="text-xs text-content-secondary">${seg.price.toFixed(2)}</p>
-                </div>
-                {seg.status === "booked" && (
-                  <>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      title="Mark completed"
-                      onClick={() => completeSegmentMut.mutate(seg.id)}
-                      disabled={completeSegmentMut.isPending || cancelSegmentMut.isPending}
-                    >
-                      <Check className="size-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      title="Cancel this service"
-                      onClick={() => cancelSegmentMut.mutate(seg.id)}
-                      disabled={cancelSegmentMut.isPending || completeSegmentMut.isPending}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </>
-                )}
+              <div>
+                <p className="font-medium text-body-2 text-foreground">This booking was cancelled</p>
+                <p className="text-body-3 text-content-secondary mt-1">
+                  No appointments are scheduled. The original slots were released back to the calendar.
+                </p>
               </div>
             </div>
-          ))}
+          ) : (
+            <div className="flex flex-col gap-1">
+              <div className="text-body-3 font-medium tracking-[0.06em] text-content-tertiary mb-2.5">
+                APPOINTMENT TIMELINE
+              </div>
+              {timeline && (
+                <BookingTimeline
+                  timeline={timeline}
+                  segments={activeSegments.map((s) => ({
+                    key: s.id,
+                    name: serviceByID.get(s.service_id)?.name ?? s.service_id,
+                    start: s.start_time,
+                    end: s.end_time,
+                  }))}
+                  variant="large"
+                />
+              )}
 
-          <div className="flex items-center justify-between border-t border-border pt-3 mt-1">
-            <span className="text-sm text-content-secondary">Total</span>
-            <span className="font-bold">${booking.total_price.toFixed(2)}</span>
-          </div>
-        </div>
+              <div className="flex flex-col gap-2 mt-5">
+                {segments.map((seg) => {
+                  const name = serviceByID.get(seg.service_id)?.name ?? seg.service_id;
+                  const employee = employeeByID.get(seg.employee_id)?.name ?? seg.employee_id;
+                  const v = serviceVisual(name);
+                  const cancelled = seg.status === "cancelled";
+                  const completed = seg.status === "completed";
+
+                  return (
+                    <div
+                      key={seg.id}
+                      className={cn(
+                        "flex flex-wrap items-center gap-3 rounded-md border border-border p-3",
+                        cancelled && "opacity-55"
+                      )}
+                    >
+                      <span className="self-stretch w-1 rounded-full shrink-0" style={{ backgroundColor: v.solid }} />
+                      <PersonAvatar name={employee} size="md" />
+                      <div className="flex-1 min-w-40">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-body-2 text-foreground capitalize">{name}</span>
+                          {completed && <Badge variant="status-info">Completed</Badge>}
+                          {cancelled && <Badge variant="destructive">Cancelled</Badge>}
+                        </div>
+                        <div className="text-body-3 text-content-secondary mt-0.5">
+                          {employee} · {formatTimeRange(seg.start_time, seg.end_time)}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto sm:ml-0">
+                        <div className="text-body-2 font-medium tabular-nums shrink-0">{formatMoney(seg.price)}</div>
+                        {seg.status === "booked" && (
+                          <div className="flex gap-1.5 shrink-0">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              title="Mark this service completed"
+                              onClick={() => completeSegmentMut.mutate(seg.id)}
+                              disabled={completeSegmentMut.isPending || cancelSegmentMut.isPending}
+                              className="border-transparent bg-tag-success text-tag-success-text! hover:opacity-80"
+                            >
+                              <Check className="size-3.5" />
+                              Complete
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              title="Cancel this service"
+                              onClick={() => cancelSegmentMut.mutate(seg.id)}
+                              disabled={cancelSegmentMut.isPending || completeSegmentMut.isPending}
+                              className="border-transparent bg-tag-destructive text-tag-destructive-text! hover:opacity-80"
+                            >
+                              <X className="size-3.5" />
+                              Cancel
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between border-t border-border pt-3.5 mt-4">
+                <span className="text-body-2 text-content-secondary">Total</span>
+                <span className="text-heading-3 font-semibold tabular-nums">{formatMoney(booking.total_price)}</span>
+              </div>
+            </div>
+          )}
+        </DialogBodyContent>
 
         <DialogFooter>
           {booking.status === "confirmed" && (
@@ -182,4 +242,8 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
       </DialogContent>
     </Dialog>
   );
+}
+
+function DialogBodyContent({ children }: { children: React.ReactNode }) {
+  return <div className="max-h-[60vh] overflow-y-auto py-3">{children}</div>;
 }

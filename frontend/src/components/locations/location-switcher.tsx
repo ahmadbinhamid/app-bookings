@@ -1,5 +1,5 @@
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@flowposltd/ui";
-import { AlertTriangle } from "lucide-react";
+import { MapPin, AlertTriangle } from "lucide-react";
 import { useLocationContext } from "@/contexts/location-context";
 
 // Every domain screen operates against whichever location is picked here —
@@ -11,7 +11,8 @@ export function LocationSwitcher() {
 
   return (
     <Select value={selectedLocationId ?? undefined} onValueChange={setSelectedLocationId}>
-      <SelectTrigger className="w-56">
+      <SelectTrigger className="w-36 sm:w-56 rounded-full">
+        <MapPin className="size-3.5 shrink-0 text-primary" />
         <SelectValue placeholder="Select a location" />
       </SelectTrigger>
       <SelectContent>

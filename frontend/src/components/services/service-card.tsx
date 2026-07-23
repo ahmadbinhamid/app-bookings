@@ -1,29 +1,55 @@
+import { useQuery } from "@tanstack/react-query";
 import { Badge, Button } from "@flowposltd/ui";
-import { MoreHorizontal, Pencil, Trash2, Clock, Users } from "lucide-react";
+import { MoreHorizontal, Pencil, Trash2, Clock, Scissors, ChevronRight, Users } from "lucide-react";
 import { type Service } from "@/types";
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuSeparator,
 } from "@flowposltd/ui";
 import { DropdownMenuDangerItem } from "@/components/ui/dropdown-menu";
+import { PersonAvatar } from "@/components/ui/person-avatar";
+import { listAssignedEmployees } from "@/lib/api";
+import { queryKeys } from "@/lib/query-keys";
+import { serviceVisual } from "@/constants/service-visuals";
+import { cn, formatMoney } from "@/utils";
 
 interface ServiceCardProps {
   service: Service;
+  locationId: string;
   onEdit: () => void;
   onDelete: () => void;
   onManageEmployees: () => void;
 }
 
-export function ServiceCard({ service, onEdit, onDelete, onManageEmployees }: ServiceCardProps) {
+export function ServiceCard({ service, locationId, onEdit, onDelete, onManageEmployees }: ServiceCardProps) {
   const isFree = !service.price || service.price === 0;
+  const v = serviceVisual(service.name);
+
+  const { data: staff = [] } = useQuery({
+    queryKey: queryKeys.serviceEmployees(locationId, service.id),
+    queryFn: () => listAssignedEmployees(locationId, service.id),
+  });
 
   return (
-    <div className="group relative flex flex-col rounded-sm border border-border bg-card shadow-card hover:shadow-elevated transition-all duration-200 overflow-hidden">
-      <div className={`h-1 w-full ${service.active ? "bg-primary" : "bg-muted"} shrink-0`} />
+    <div className="group relative flex flex-col rounded-md border border-border bg-card shadow-card hover:shadow-elevated transition-all duration-200 overflow-hidden">
+      <div className="h-1.5 w-full shrink-0" style={{ backgroundColor: v.solid }} />
 
-      <div className="flex flex-col gap-3 p-4 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <h4 className="font-semibold text-foreground leading-tight">{service.name}</h4>
+      <div className="flex flex-col gap-3.5 p-5 flex-1">
+        <div className="flex items-start gap-3.5">
+          <div
+            className="flex size-11 shrink-0 items-center justify-center rounded-md"
+            style={{ backgroundColor: v.bg, color: v.fg }}
+          >
+            <Scissors className="size-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-semibold text-foreground capitalize leading-tight truncate">{service.name}</h4>
+            <div className="flex items-center gap-1.5 mt-1 text-body-3 text-content-secondary font-medium">
+              <Clock className="size-3.5 shrink-0" />
+              {service.duration_minutes} min
+              {service.buffer_minutes > 0 && ` (+${service.buffer_minutes} buffer)`}
+            </div>
+          </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -61,32 +87,37 @@ export function ServiceCard({ service, onEdit, onDelete, onManageEmployees }: Se
           </DropdownMenu>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-content-secondary">
-          <span className="flex items-center gap-1">
-            <Clock className="size-3 shrink-0" />
-            {service.duration_minutes} min
-            {service.buffer_minutes > 0 && ` (+${service.buffer_minutes} buffer)`}
-          </span>
-          {!service.active && <Badge variant="secondary">Inactive</Badge>}
-        </div>
+        {!service.active && <Badge variant="secondary" className="w-fit">Inactive</Badge>}
 
-        <p className="text-sm text-content-secondary line-clamp-2 flex-1 min-h-[2.5rem]">
-          {service.description || <span className="italic opacity-60">No description</span>}
+        <p className={cn("text-body-2 flex-1 min-h-10 line-clamp-2", service.description ? "text-content-secondary" : "italic text-content-tertiary")}>
+          {service.description || "No description added"}
         </p>
 
-        <div className="flex items-center justify-between pt-2 border-t border-border mt-auto">
+        <div className="flex items-center justify-between pt-3.5 border-t border-border mt-auto">
           {isFree ? (
-            <Badge variant="status-success" className="text-xs">Free</Badge>
+            <Badge variant="status-success" className="text-body-3">Free</Badge>
           ) : (
-            <span className="text-base font-bold text-foreground tracking-tight">
-              ${service.price.toFixed(2)}
-            </span>
+            <span className="text-heading-2 font-semibold text-foreground">{formatMoney(service.price)}</span>
           )}
           <button
             onClick={onManageEmployees}
-            className="text-xs text-content-secondary hover:text-primary transition-colors font-medium"
+            className="flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-body-3 font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors"
           >
-            Employees →
+            {staff.length > 0 && (
+              <div className="flex">
+                {staff.slice(0, 3).map((e, i) => (
+                  <PersonAvatar
+                    key={e.id}
+                    name={e.name}
+                    seed={e.name + e.email}
+                    size="xs"
+                    className={cn("ring-2 ring-card", i > 0 && "-ml-2")}
+                  />
+                ))}
+              </div>
+            )}
+            {staff.length} staff
+            <ChevronRight className="size-3.5" />
           </button>
         </div>
       </div>
@@ -96,9 +127,9 @@ export function ServiceCard({ service, onEdit, onDelete, onManageEmployees }: Se
 
 export function ServiceCardSkeleton() {
   return (
-    <div className="flex flex-col rounded-sm border border-border bg-card overflow-hidden">
-      <div className="h-1 bg-muted animate-pulse" />
-      <div className="p-4 flex flex-col gap-3">
+    <div className="flex flex-col rounded-md border border-border bg-card overflow-hidden">
+      <div className="h-1.5 bg-muted animate-pulse" />
+      <div className="p-5 flex flex-col gap-3.5">
         <div className="h-4 w-2/3 bg-muted animate-pulse rounded" />
         <div className="h-3 w-1/3 bg-muted animate-pulse rounded" />
         <div className="space-y-1.5">

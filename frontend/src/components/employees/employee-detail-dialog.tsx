@@ -17,14 +17,14 @@ interface EmployeeDetailDialogProps {
 export function EmployeeDetailDialog({ open, onClose, locationId, employee }: EmployeeDetailDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-3xl">
         <DialogHeader>
           <DialogTitle>{employee?.name}</DialogTitle>
           <DialogDescription>
-            Weekly working hours and time off — used by the booking solver to work out availability.
+            Weekly working hours and time off — used by the solver to work out availability.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody>
+        <DialogBody className="max-h-[70vh]">
           {employee && (
             <Tabs defaultValue="schedule">
               <TabsList>

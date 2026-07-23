@@ -68,7 +68,7 @@ function TimezoneDialog({ open, onClose }: { open: boolean; onClose: () => void 
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent>
+      <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
         <DialogHeader>
           <DialogTitle>Set location timezone</DialogTitle>
           <DialogDescription>

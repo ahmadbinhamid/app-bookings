@@ -1,5 +1,9 @@
 import { NavLink } from "react-router-dom";
 import { CalendarDays, Scissors, Users } from "lucide-react";
+import {
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
+  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
+} from "@flowposltd/ui";
 import { cn } from "@/utils";
 
 // One entry per top-level page — see app-bookings design doc for the domain.
@@ -10,35 +14,46 @@ const NAV = [
 ];
 
 export function AppNav() {
+  const { setOpenMobile } = useSidebar();
+
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-secondary">
-      <div className="flex items-center gap-2.5 px-4 py-4 border-b border-border">
-        <div className="flex size-7 items-center justify-center rounded-sm bg-primary text-primary-foreground text-sm font-bold shrink-0">
+    <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-card">
+      <SidebarHeader className="items-center">
+        <div className="flex size-8.5 shrink-0 items-center justify-center rounded-md bg-linear-to-br from-primary to-[#E876E1] text-body-2 font-semibold text-white shadow-[0_6px_16px_-4px_rgba(124,58,237,0.5)]">
           B
         </div>
-        <span className="text-sm font-semibold text-foreground">App Booking</span>
-      </div>
+      </SidebarHeader>
 
-      <nav className="flex flex-col gap-0.5 p-2 flex-1">
-        {NAV.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm font-medium transition-colors",
-                isActive
-                  ? "bg-primary/10 text-primary"
-                  : "text-content-secondary hover:bg-muted hover:text-foreground"
-              )
-            }
-          >
-            <Icon className="size-4 shrink-0" />
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-    </aside>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel className="uppercase tracking-wider">Manage</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {NAV.map(({ to, label, icon: Icon }) => (
+                <SidebarMenuItem key={to}>
+                  <SidebarMenuButton asChild tooltip={label} className="hover:bg-transparent">
+                    <NavLink to={to} end onClick={() => setOpenMobile(false)}>
+                      {({ isActive }) => (
+                        <div
+                          className={cn(
+                            "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+                            isActive
+                              ? "bg-primary/10 font-medium text-primary"
+                              : "text-content-secondary hover:bg-muted hover:text-foreground"
+                          )}
+                        >
+                          <Icon className="size-4 shrink-0" />
+                          <span className="truncate">{label}</span>
+                        </div>
+                      )}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
   );
 }

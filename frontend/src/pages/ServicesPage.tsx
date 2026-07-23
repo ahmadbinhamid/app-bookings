@@ -84,8 +84,8 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="p-6 flex flex-col gap-5">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 flex flex-col gap-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <h1>Services</h1>
@@ -93,15 +93,15 @@ export default function ServicesPage() {
           </div>
           <p className="lead mt-0.5">Manage the services available for booking at this location.</p>
         </div>
-        <Button onClick={openCreate}>
+        <Button onClick={openCreate} className="self-start">
           <Plus className="size-4" />
           New Service
         </Button>
       </div>
 
-      <div className="flex items-center gap-3">
-        <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1">
-          <div className="relative max-w-xs w-full">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="relative w-full sm:max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-content-secondary pointer-events-none z-10" />
             <Input
               value={draft}
@@ -123,7 +123,7 @@ export default function ServicesPage() {
         </form>
 
         {meta && (
-          <div className="flex items-center gap-1.5 text-xs text-content-secondary shrink-0">
+          <div className="flex items-center gap-1.5 text-body-3 text-content-secondary shrink-0">
             <span>{meta.total} result{meta.total !== 1 ? "s" : ""}</span>
             <Button variant="ghost" size="icon" className="size-7" onClick={() => setPage(page - 1)} disabled={page <= 1}>
               <ChevronLeft className="size-4" />
@@ -162,6 +162,7 @@ export default function ServicesPage() {
             <ServiceCard
               key={svc.id}
               service={svc}
+              locationId={selectedLocationId}
               onEdit={() => openEdit(svc)}
               onDelete={() => handleDelete(svc)}
               onManageEmployees={() => setAssignmentsFor(svc)}
@@ -170,12 +171,12 @@ export default function ServicesPage() {
 
           <button
             onClick={openCreate}
-            className="flex flex-col items-center justify-center gap-2 rounded-sm border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 min-h-[160px] p-6 text-content-secondary hover:text-primary"
+            className="flex flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 min-h-40 p-6 text-content-secondary hover:text-primary"
           >
             <div className="rounded-full border-2 border-current p-2">
               <Plus className="size-5" />
             </div>
-            <span className="text-sm font-medium">Add Service</span>
+            <span className="text-body-2 font-medium">Add Service</span>
           </button>
         </div>
       )}

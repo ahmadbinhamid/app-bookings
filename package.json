@@ -1,0 +1,16 @@
+{
+  "name": "app-booking",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Root dev orchestration for app-booking (Go API + Vite frontend). Real dependencies live in frontend/package.json and backend/go.mod — this package.json only owns the two-process `dev` script.",
+  "scripts": {
+    "dev": "concurrently -n WEB,API -c blue,green \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "npm --prefix frontend run dev:web",
+    "dev:api": "go run -C backend ./cmd/server",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

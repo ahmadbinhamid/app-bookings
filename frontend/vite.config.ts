@@ -24,6 +24,12 @@ export default defineConfig({
     target: 'esnext',
   },
   server: {
+    // Vite's dev-server Host header check rejects any origin it doesn't
+    // recognize by default. Embedding this app inside tenant-dashboard
+    // during local dev goes through an ngrok tunnel (a random subdomain
+    // that changes every time the tunnel restarts), so allowlist the
+    // domain suffixes rather than one ephemeral hostname.
+    allowedHosts: ['.ngrok-free.dev', '.ngrok-free.app', '.ngrok.io'],
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

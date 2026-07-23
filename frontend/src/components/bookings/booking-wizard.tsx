@@ -3,14 +3,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
-  Button, Input, Checkbox,
+  Button, Input,
 } from "@flowposltd/ui";
-import { Clock, ArrowRight, RotateCcw } from "lucide-react";
+import { Scissors, ArrowRight, RotateCcw, CheckCircle2, Check } from "lucide-react";
 import { DialogBody } from "@/components/ui/dialog-body";
 import { FormField } from "@/components/ui/form-field";
+import { PersonAvatar } from "@/components/ui/person-avatar";
+import { BookingTimeline } from "@/components/ui/booking-timeline";
+import { DatePopover } from "@/components/ui/calendar-popover";
+import { TimePopover } from "@/components/ui/time-popover";
 import { ApiError } from "@/lib/api/client";
-import { listServices, listEmployees, proposeBooking, confirmBooking, rescheduleBooking } from "@/lib/api";
+import { proposeBooking, confirmBooking, rescheduleBooking, listServices, listEmployees } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
+import { serviceVisual } from "@/constants/service-visuals";
+import { cn, formatMoney, formatDuration, formatTime, formatTimeRange, buildTimeline, toISODateLocal, combineDateAndMinutes } from "@/utils";
 import { type Proposal, type Service, type Employee } from "@/types";
 
 interface BookingWizardProps {
@@ -26,14 +32,12 @@ interface BookingWizardProps {
 
 type Step = "select" | "review";
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-function toDatetimeLocalDefault(): string {
-  const d = new Date(Date.now() + 60 * 60 * 1000); // an hour from now, as a sane default
-  d.setMinutes(0, 0, 0);
-  return d.toISOString().slice(0, 16);
+// An hour from now, minutes rounded up to the next quarter hour — a sane
+// starting point for "earliest start" before the admin adjusts it.
+function defaultEarliest(): { date: string; minutes: number } {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  const raw = d.getHours() * 60 + d.getMinutes();
+  return { date: toISODateLocal(d), minutes: Math.ceil(raw / 15) * 15 };
 }
 
 export function BookingWizard({ open, onClose, locationId, bookingId, initialServiceIds }: BookingWizardProps) {
@@ -42,7 +46,8 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
 
   const [step, setStep] = useState<Step>("select");
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
-  const [earliestStart, setEarliestStart] = useState(toDatetimeLocalDefault());
+  const [earliestDate, setEarliestDate] = useState(() => defaultEarliest().date);
+  const [earliestMinutes, setEarliestMinutes] = useState(() => defaultEarliest().minutes);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [proposeError, setProposeError] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
@@ -51,9 +56,11 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
 
   useEffect(() => {
     if (open) {
+      const def = defaultEarliest();
       setStep("select");
       setSelectedServiceIds(initialServiceIds ?? []);
-      setEarliestStart(toDatetimeLocalDefault());
+      setEarliestDate(def.date);
+      setEarliestMinutes(def.minutes);
       setProposal(null);
       setProposeError("");
       setCustomerName("");
@@ -82,7 +89,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
     mutationFn: () =>
       proposeBooking(locationId, {
         services: selectedServiceIds.map((id) => ({ service_id: id })),
-        earliest_start: new Date(earliestStart).toISOString(),
+        earliest_start: combineDateAndMinutes(earliestDate, earliestMinutes),
       }),
     onSuccess: (p) => {
       setProposal(p);
@@ -160,45 +167,126 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   }
 
   const confirming = confirmMut.isPending || rescheduleMut.isPending;
+  const selectedServices = selectedServiceIds.map((id) => serviceByID.get(id)).filter(Boolean) as Service[];
+  const totalMinutes = selectedServices.reduce((a, s) => a + s.duration_minutes, 0);
+  const totalPrice = selectedServices.reduce((a, s) => a + s.price, 0);
+
+  const proposalTimeline =
+    proposal &&
+    buildTimeline(
+      proposal.segments.map((seg, i) => ({
+        key: String(i),
+        name: serviceByID.get(seg.service_id)?.name ?? seg.service_id,
+        start: seg.start,
+        end: seg.end,
+      }))
+    );
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-xl">
         <DialogHeader>
           <DialogTitle>{isReschedule ? "Reschedule booking" : "New booking"}</DialogTitle>
           <DialogDescription>
             {step === "select"
               ? "Pick the services and the earliest time to look from."
-              : "Review the proposed times before confirming — nothing is booked yet."}
+              : "Slots found — review the timeline below before confirming."}
           </DialogDescription>
         </DialogHeader>
+
+        <div className="flex gap-2 -mt-1">
+          <div className="h-1 flex-1 rounded-full bg-primary" />
+          <div className={cn("h-1 flex-1 rounded-full", step === "review" ? "bg-primary" : "bg-muted")} />
+        </div>
 
         {step === "select" && (
           <>
             <DialogBody className="flex flex-col gap-4">
-              <FormField label="Services" required>
-                <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto rounded-sm border border-border p-2">
-                  {services.length === 0 && (
-                    <p className="text-sm text-content-secondary p-2">No services yet at this location.</p>
-                  )}
-                  {services.map((svc) => (
-                    <label key={svc.id} className="flex items-center gap-2.5 rounded-sm px-2 py-1.5 hover:bg-muted cursor-pointer">
-                      <Checkbox
-                        checked={selectedServiceIds.includes(svc.id)}
-                        onCheckedChange={() => toggleService(svc.id)}
-                      />
-                      <span className="flex-1">{svc.name}</span>
-                      <span className="text-xs text-content-secondary">{svc.duration_minutes} min · ${svc.price.toFixed(2)}</span>
-                    </label>
-                  ))}
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-body-2 font-medium text-foreground">
+                    Services<span className="text-destructive ml-0.5">*</span>
+                  </span>
+                  <span className="text-body-3 text-content-tertiary">
+                    {selectedServices.length ? `${selectedServices.length} selected` : "Select one or more"}
+                  </span>
                 </div>
-              </FormField>
+                <div className="flex flex-col gap-2.5 max-h-64 overflow-y-auto">
+                  {services.length === 0 && (
+                    <p className="text-body-2 text-content-secondary p-2">No services yet at this location.</p>
+                  )}
+                  {services.map((svc) => {
+                    const on = selectedServiceIds.includes(svc.id);
+                    const v = serviceVisual(svc.name);
+                    return (
+                      <div
+                        key={svc.id}
+                        onClick={() => toggleService(svc.id)}
+                        className={cn(
+                          "flex items-center gap-3.5 rounded-md border p-3 cursor-pointer transition-colors",
+                          on ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                        )}
+                      >
+                        <div
+                          className="flex size-10 shrink-0 items-center justify-center rounded-md"
+                          style={{ backgroundColor: v.bg, color: v.fg }}
+                        >
+                          <Scissors className="size-4.5" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-body-2 text-foreground capitalize">{svc.name}</div>
+                          <div className="flex gap-3 mt-0.5 text-body-3 text-content-secondary">
+                            <span>{svc.duration_minutes} min</span>
+                            <span className="font-medium text-foreground">{formatMoney(svc.price)}</span>
+                          </div>
+                        </div>
+                        <div
+                          className={cn(
+                            "flex size-5.5 shrink-0 items-center justify-center rounded-md",
+                            on ? "bg-primary" : "border-2 border-border"
+                          )}
+                        >
+                          {on && <Check className="size-3.5 text-primary-foreground" strokeWidth={3} />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
-              <FormField label="Earliest start" required hint="The solver looks for the first available time at or after this">
-                <Input type="datetime-local" value={earliestStart} onChange={(e) => setEarliestStart(e.target.value)} />
-              </FormField>
+              <div>
+                <span className="text-body-2 font-medium text-foreground block mb-2.5">
+                  Earliest start<span className="text-destructive ml-0.5">*</span>
+                </span>
+                <div className="flex flex-col gap-2.5 sm:flex-row">
+                  <DatePopover value={earliestDate} onChange={setEarliestDate} className="sm:flex-[1.3]" />
+                  <TimePopover value={earliestMinutes} onChange={setEarliestMinutes} className="sm:flex-1" />
+                </div>
+                <p className="text-body-3 text-content-tertiary mt-1.5">
+                  The solver looks for the first available slot at or after this time.
+                </p>
+              </div>
 
-              {proposeError && <p className="text-sm text-destructive">{proposeError}</p>}
+              {selectedServices.length > 0 && (
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-3.5">
+                  <div className="flex items-center gap-2 text-body-3 font-medium text-primary">
+                    <CheckCircle2 className="size-3.5" />
+                    {selectedServices.length} service{selectedServices.length === 1 ? "" : "s"} selected
+                  </div>
+                  <div className="flex gap-6 mt-3">
+                    <div>
+                      <div className="text-body-3 text-content-secondary font-medium mb-0.5">Total duration</div>
+                      <div className="text-body-1 font-semibold text-foreground">{formatDuration(totalMinutes)}</div>
+                    </div>
+                    <div>
+                      <div className="text-body-3 text-content-secondary font-medium mb-0.5">Total price</div>
+                      <div className="text-body-1 font-semibold text-primary">{formatMoney(totalPrice)}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {proposeError && <p className="text-body-2 text-destructive">{proposeError}</p>}
             </DialogBody>
             <DialogFooter>
               <Button type="button" variant="secondary" onClick={onClose}>Cancel</Button>
@@ -214,39 +302,52 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
           </>
         )}
 
-        {step === "review" && proposal && (
+        {step === "review" && proposal && proposalTimeline && (
           <>
             <DialogBody className="flex flex-col gap-4">
+              <div className="flex items-start gap-2.5 rounded-md border border-transparent bg-tag-success p-3.5">
+                <CheckCircle2 className="size-4.5 shrink-0 text-tag-success-text" />
+                <p className="text-body-2 text-tag-success-text">
+                  <b>Slots found.</b> First available fit starting {formatTime(proposal.segments[0].start)}. Review
+                  the timeline below.
+                </p>
+              </div>
+
+              <BookingTimeline
+                timeline={proposalTimeline}
+                segments={proposal.segments.map((seg, i) => ({
+                  key: String(i),
+                  name: serviceByID.get(seg.service_id)?.name ?? seg.service_id,
+                  start: seg.start,
+                  end: seg.end,
+                }))}
+                variant="large"
+              />
+
               <div className="flex flex-col gap-2">
                 {proposal.segments.map((seg, i) => {
-                  const prevEnd = i > 0 ? proposal.segments[i - 1].end : null;
-                  const gapMinutes = prevEnd ? Math.round((new Date(seg.start).getTime() - new Date(prevEnd).getTime()) / 60000) : 0;
+                  const name = serviceByID.get(seg.service_id)?.name ?? seg.service_id;
+                  const employee = employeeByID.get(seg.employee_id)?.name ?? seg.employee_id;
+                  const v = serviceVisual(name);
                   return (
-                    <div key={i}>
-                      {gapMinutes > 0 && (
-                        <div className="flex items-center gap-2 pl-3 py-1 text-xs text-content-secondary italic">
-                          <Clock className="size-3" />
-                          {gapMinutes} min gap
-                        </div>
-                      )}
-                      <div className="flex items-center justify-between rounded-sm border border-border p-3">
-                        <div>
-                          <p className="font-medium text-foreground">{serviceByID.get(seg.service_id)?.name ?? seg.service_id}</p>
-                          <p className="text-xs text-content-secondary">{employeeByID.get(seg.employee_id)?.name ?? seg.employee_id}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="tabular-nums font-medium">{formatTime(seg.start)} – {formatTime(seg.end)}</p>
-                          <p className="text-xs text-content-secondary">${seg.price.toFixed(2)}</p>
+                    <div key={i} className="flex items-center gap-3 rounded-md border border-border p-3">
+                      <span className="size-2.5 rounded-[3px] shrink-0" style={{ backgroundColor: v.solid }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-body-2 text-foreground capitalize">{name}</div>
+                        <div className="flex items-center gap-1.5 mt-0.5 text-body-3 text-content-secondary">
+                          <PersonAvatar name={employee} size="xs" />
+                          {employee}
                         </div>
                       </div>
+                      <div className="text-body-2 font-medium tabular-nums">{formatTimeRange(seg.start, seg.end)}</div>
                     </div>
                   );
                 })}
               </div>
 
               <div className="flex items-center justify-between border-t border-border pt-3">
-                <span className="text-sm text-content-secondary">Total</span>
-                <span className="font-bold">${proposal.total_price.toFixed(2)}</span>
+                <span className="text-body-2 text-content-secondary">Total</span>
+                <span className="text-heading-3 font-semibold">{formatMoney(proposal.total_price)}</span>
               </div>
 
               {!isReschedule && (
@@ -254,7 +355,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
                   <FormField label="Customer name" required>
                     <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Jane Doe" />
                   </FormField>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <FormField label="Phone">
                       <Input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Optional" />
                     </FormField>
@@ -275,6 +376,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
                 loading={confirming}
                 disabled={!isReschedule && !customerName.trim()}
               >
+                <Check className="size-3.5" />
                 {isReschedule ? "Confirm reschedule" : "Confirm booking"}
               </Button>
             </DialogFooter>

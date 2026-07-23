@@ -18,7 +18,7 @@ export function FormField({ label, hint, required, children, className }: FormFi
         {required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
       {children}
-      {hint && <p className="text-xs text-content-secondary">{hint}</p>}
+      {hint && <p className="text-body-3 text-content-secondary">{hint}</p>}
     </div>
   );
 }

@@ -64,14 +64,18 @@ body {
     overflow: hidden;
   }
 
-  h1 { @apply text-2xl font-bold tracking-tight; }
-  h2 { @apply text-xl font-semibold tracking-tight; }
-  h3 { @apply text-lg font-semibold; }
-  h4 { @apply text-base font-semibold; }
-  p  { @apply text-sm leading-relaxed text-content-secondary; }
+  /* Match tenant-dashboard's actual type rhythm: route every heading/body
+     element through the kit's own text-heading and text-body scale (each
+     bundles font-size, line-height, letter-spacing, and font-weight — see
+     @flowposltd/design-tokens/css) rather than ad-hoc Tailwind defaults. */
+  h1 { @apply text-heading-1; }
+  h2 { @apply text-heading-2; }
+  h3 { @apply text-heading-3; }
+  h4 { @apply text-heading-4; }
+  p  { @apply text-body-2 text-content-secondary; }
 
-  .lead    { @apply text-base leading-relaxed text-content-secondary; }
-  .caption { @apply text-xs text-content-secondary; }
+  .lead    { @apply text-body-1 text-content-secondary; }
+  .caption { @apply text-body-3 text-content-secondary; }
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
