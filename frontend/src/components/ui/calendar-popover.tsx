@@ -145,7 +145,13 @@ export function DatePopover({ value, onChange, placeholder = "Select date", clas
         createPortal(
           <div
             ref={popoverRef}
-            style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999 }}
+            style={{
+              position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999,
+              // See time-popover.tsx: Radix's modal Dialog disables pointer events
+              // on body and only re-enables them on its own content node, so this
+              // body-portaled popover would otherwise be inert while a Dialog is open.
+              pointerEvents: "auto",
+            }}
             className={POPOVER_CLASS}
           >
             <MonthNav
@@ -258,7 +264,13 @@ export function DateRangePopover({ value, onChange, placeholder = "All dates", c
         createPortal(
           <div
             ref={popoverRef}
-            style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999 }}
+            style={{
+              position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999,
+              // See time-popover.tsx: Radix's modal Dialog disables pointer events
+              // on body and only re-enables them on its own content node, so this
+              // body-portaled popover would otherwise be inert while a Dialog is open.
+              pointerEvents: "auto",
+            }}
             className={POPOVER_CLASS}
           >
             <MonthNav

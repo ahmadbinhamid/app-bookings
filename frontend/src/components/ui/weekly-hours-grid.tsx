@@ -3,7 +3,7 @@ import { cn } from "@/utils";
 import { type Schedule } from "@/types";
 
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const GRID_HEIGHT = 320;
+const GRID_HEIGHT = 220;
 
 function parseTime(t: string): number {
   const [h, m] = t.split(":").map(Number);
@@ -12,9 +12,9 @@ function parseTime(t: string): number {
 
 function formatHourLabel(hourOfDay: number): string {
   const h = hourOfDay % 24;
-  const period = h < 12 ? "a" : "p";
+  const period = h < 12 ? "AM" : "PM";
   const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return `${hour12}${period}`;
+  return `${hour12} ${period}`;
 }
 
 function formatCompactTime(t: string): string {
@@ -65,7 +65,7 @@ export function WeeklyHoursGrid({ schedules, className, onRemove }: WeeklyHoursG
   return (
     <div className={cn("rounded-md border border-border overflow-x-auto", className)}>
       <div className="min-w-140">
-      <div className="grid" style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}>
+      <div className="grid" style={{ gridTemplateColumns: "56px repeat(7, 1fr)" }}>
         <div className="border-b border-border" />
         {DAYS_SHORT.map((label, day) => {
           const on = byDay[day].length > 0;
@@ -92,12 +92,12 @@ export function WeeklyHoursGrid({ schedules, className, onRemove }: WeeklyHoursG
         })}
       </div>
 
-      <div className="relative grid" style={{ gridTemplateColumns: "48px repeat(7, 1fr)", height: GRID_HEIGHT }}>
+      <div className="relative grid" style={{ gridTemplateColumns: "56px repeat(7, 1fr)", height: GRID_HEIGHT }}>
         <div className="relative">
           {hourMarks.map((h) => (
             <div
               key={h.minutes}
-              className="absolute right-1.5 -translate-y-1/2 text-body-3 text-content-tertiary tabular-nums"
+              className="absolute right-1.5 -translate-y-1/2 whitespace-nowrap text-body-3 text-content-tertiary tabular-nums"
               style={{ top: topFor(h.minutes) }}
             >
               {h.label}

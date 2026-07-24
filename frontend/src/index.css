@@ -83,7 +83,12 @@ body {
 ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 9999px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--color-neutral-400) / 0.35); }
 
-:focus-visible {
+/* text inputs/textareas already paint their own focus border (see
+   @flowposltd/ui's INPUT_STYLES) — this generic fallback ring is only for
+   elements (buttons, links, etc.) that don't have one of their own.
+   Without the :not(), the two focus indicators stack into a visible
+   double border on every text field. */
+:focus-visible:not(input):not(textarea) {
   outline: 2px solid hsl(var(--ring));
   outline-offset: 2px;
 }

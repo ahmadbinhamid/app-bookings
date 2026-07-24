@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { CalendarDays, Scissors, Users } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
-  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
 } from "@flowposltd/ui";
 import { cn } from "@/utils";
 
@@ -18,12 +18,6 @@ export function AppNav() {
 
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border bg-card">
-      <SidebarHeader className="items-center">
-        <div className="flex size-8.5 shrink-0 items-center justify-center rounded-md bg-linear-to-br from-primary to-[#E876E1] text-body-2 font-semibold text-white shadow-[0_6px_16px_-4px_rgba(124,58,237,0.5)]">
-          B
-        </div>
-      </SidebarHeader>
-
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="uppercase tracking-wider">Manage</SidebarGroupLabel>

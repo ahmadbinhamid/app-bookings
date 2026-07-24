@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Badge, Button, Input } from "@flowposltd/ui";
@@ -39,11 +39,20 @@ export default function ServicesPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
+  // Deleting the last item on the last page would otherwise strand the view
+  // on an empty page even though earlier pages still have services.
+  useEffect(() => {
+    if (data?.meta && data.meta.total_pages > 0 && page > data.meta.total_pages) {
+      setPage(data.meta.total_pages);
+    }
+  }, [data?.meta, page]);
+
   if (locationsLoading) return null;
   if (!selectedLocationId) {
     return (
       <div className="p-6">
         <EmptyState
+          variant="hero"
           icon={Scissors}
           title="No location yet"
           description="Services are managed per location — once FlowPOS sync has run, a location will show up here."
@@ -55,6 +64,11 @@ export default function ServicesPage() {
   const services = data?.data ?? [];
   const meta = data?.meta;
   const totalPages = meta?.total_pages ?? 1;
+  const totalCount = meta?.total ?? 0;
+  // Nothing to search or page through when the location has zero services —
+  // only show the toolbar once there's something (or a search) for it to act on.
+  const showToolbar = isLoading || Boolean(search) || totalCount > 0;
+  const isTrueEmpty = !isLoading && !search && totalCount === 0;
 
   function handleSearch(e: React.FormEvent) {
     e.preventDefault();
@@ -99,42 +113,44 @@ export default function ServicesPage() {
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
-          <div className="relative w-full sm:max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-content-secondary pointer-events-none z-10" />
-            <Input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="Search services…"
-              className="pl-9"
-            />
-            {draft && (
-              <button
-                type="button"
-                onClick={handleClear}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-content-secondary hover:text-foreground transition-colors z-10"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-          <Button type="submit" variant="secondary" size="sm">Search</Button>
-        </form>
+      {showToolbar && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <form onSubmit={handleSearch} className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-content-secondary pointer-events-none z-10" />
+              <Input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="Search services…"
+                className="pl-9"
+              />
+              {draft && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-content-secondary hover:text-foreground transition-colors z-10"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+            <Button type="submit" variant="secondary" size="sm">Search</Button>
+          </form>
 
-        {meta && (
-          <div className="flex items-center gap-1.5 text-body-3 text-content-secondary shrink-0">
-            <span>{meta.total} result{meta.total !== 1 ? "s" : ""}</span>
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setPage(page - 1)} disabled={page <= 1}>
-              <ChevronLeft className="size-4" />
-            </Button>
-            <span className="font-medium">{page} / {totalPages}</span>
-            <Button variant="ghost" size="icon" className="size-7" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
-              <ChevronRight className="size-4" />
-            </Button>
-          </div>
-        )}
-      </div>
+          {meta && (
+            <div className="flex items-center gap-1.5 text-body-3 text-content-secondary shrink-0">
+              <span>{meta.total} result{meta.total !== 1 ? "s" : ""}</span>
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => setPage(page - 1)} disabled={page <= 1}>
+                <ChevronLeft className="size-4" />
+              </Button>
+              <span className="font-medium">{page} / {totalPages}</span>
+              <Button variant="ghost" size="icon" className="size-7" onClick={() => setPage(page + 1)} disabled={page >= totalPages}>
+                <ChevronRight className="size-4" />
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -143,19 +159,31 @@ export default function ServicesPage() {
           ))}
         </div>
       ) : services.length === 0 ? (
-        <EmptyState
-          icon={Scissors}
-          title={search ? `No services match "${search}"` : "No services yet"}
-          description={search ? "Try a different search term." : "Add a service to make it available for booking."}
-          action={
-            !search && (
-              <Button size="sm" onClick={openCreate}>
-                <Plus className="size-3.5" />
+        isTrueEmpty ? (
+          <EmptyState
+            variant="hero"
+            icon={Scissors}
+            title="No services yet"
+            description="Add your first service to start accepting bookings."
+            action={
+              <Button onClick={openCreate}>
+                <Plus className="size-4" />
                 New Service
               </Button>
-            )
-          }
-        />
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={Scissors}
+            title={`No services match "${search}"`}
+            description="Try a different search term."
+            action={
+              <Button size="sm" variant="secondary" onClick={handleClear}>
+                Clear search
+              </Button>
+            }
+          />
+        )
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {services.map((svc) => (

@@ -35,12 +35,24 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      // FlowPOS calls these against this app's registered public URL (the
+      // ngrok tunnel in local dev) — same routes nginx.conf proxies in the
+      // Docker build, mirrored here so the marketplace install/uninstall/
+      // webhook lifecycle reaches the Go backend instead of the SPA.
+      '^/(install|uninstall|webhooks)$': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
   preview: {
     port: 5175,
     proxy: {
       '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '^/(install|uninstall|webhooks)$': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

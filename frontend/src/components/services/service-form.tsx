@@ -123,29 +123,43 @@ export function ServiceForm({ open, onClose, locationId, service, page, limit, s
               />
             </FormField>
 
-            <div className="flex flex-col gap-3.5 sm:flex-row">
-              <div className="flex-1 min-w-0">
-                <FormField label="Duration" hint={errors.duration_minutes}>
-                  <div className="flex gap-1.5">
-                    {DURATION_PRESETS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => set("duration_minutes", m)}
-                        className={cn(
-                          "flex-1 h-11 rounded-md text-body-3 font-medium border-2 transition-colors",
-                          form.duration_minutes === m
-                            ? "border-primary bg-primary/5 text-primary"
-                            : "border-border text-content-secondary hover:bg-muted"
-                        )}
-                      >
-                        {m} min
-                      </button>
-                    ))}
-                  </div>
-                </FormField>
+            <FormField label="Duration" hint={errors.duration_minutes}>
+              <div className="flex gap-1.5">
+                {DURATION_PRESETS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => set("duration_minutes", m)}
+                    className={cn(
+                      "flex-1 h-11 rounded-md text-body-3 font-medium border-2 transition-colors",
+                      form.duration_minutes === m
+                        ? "border-primary bg-primary/5 text-primary"
+                        : "border-border text-content-secondary hover:bg-muted"
+                    )}
+                  >
+                    {m} min
+                  </button>
+                ))}
+                <input
+                  type="number"
+                  min={1}
+                  value={form.duration_minutes || ""}
+                  onChange={(e) => set("duration_minutes", parseInt(e.target.value, 10) || 0)}
+                  placeholder="Custom"
+                  className={cn(
+                    "w-20 shrink-0 h-11 rounded-md text-body-3 font-medium border-2 text-center tabular-nums transition-colors",
+                    "focus-visible:outline-none focus:border-primary focus:bg-primary/5 focus:text-primary",
+                    "placeholder:text-content-tertiary placeholder:font-normal",
+                    !DURATION_PRESETS.includes(form.duration_minutes)
+                      ? "border-primary bg-primary/5 text-primary"
+                      : "border-border text-content-secondary hover:bg-muted"
+                  )}
+                />
               </div>
-              <div className="w-full sm:w-36">
+            </FormField>
+
+            <div className="flex gap-3.5">
+              <div className="flex-1">
                 <FormField label="Price" required>
                   <div className="relative">
                     <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-body-2 font-medium text-content-tertiary pointer-events-none">
@@ -163,18 +177,18 @@ export function ServiceForm({ open, onClose, locationId, service, page, limit, s
                   </div>
                 </FormField>
               </div>
+              <div className="flex-1">
+                <FormField label="Buffer (min)" hint="Employee-only, never charged">
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.buffer_minutes ?? ""}
+                    onChange={(e) => set("buffer_minutes", parseInt(e.target.value, 10) || 0)}
+                    error={errors.buffer_minutes}
+                  />
+                </FormField>
+              </div>
             </div>
-
-            <FormField label="Buffer (min)" hint="Employee-only, never charged to the client">
-              <Input
-                type="number"
-                min={0}
-                value={form.buffer_minutes ?? ""}
-                onChange={(e) => set("buffer_minutes", parseInt(e.target.value, 10) || 0)}
-                error={errors.buffer_minutes}
-                className="w-32"
-              />
-            </FormField>
 
             <FormField label="Description" hint="Optional">
               <Textarea

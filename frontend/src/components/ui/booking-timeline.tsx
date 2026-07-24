@@ -60,15 +60,26 @@ export function BookingTimeline({ timeline, segments, variant = "mini", classNam
 
       {isLarge && (
         <div className="relative h-4 mt-1.5">
-          {ticks.map((tick) => (
-            <span
-              key={tick.key}
-              className="absolute -translate-x-1/2 text-body-3 text-content-tertiary tabular-nums whitespace-nowrap"
-              style={{ left: `${tick.left}%` }}
-            >
-              {tick.label}
-            </span>
-          ))}
+          {ticks.map((tick, i) => {
+            // Centering every label on its % mark (the default) pushes the
+            // first/last labels half-off the edge, since 0% and 100% are the
+            // box's own boundaries with no room to center into. Anchor those
+            // two inward from the edge instead; only interior ticks center.
+            const isFirst = i === 0;
+            const isLast = i === ticks.length - 1;
+            return (
+              <span
+                key={tick.key}
+                className={cn(
+                  "absolute text-[11px] leading-none text-content-tertiary tabular-nums whitespace-nowrap",
+                  isFirst ? "left-0" : isLast ? "right-0" : "-translate-x-1/2"
+                )}
+                style={isFirst || isLast ? undefined : { left: `${tick.left}%` }}
+              >
+                {tick.label}
+              </span>
+            );
+          })}
         </div>
       )}
     </div>

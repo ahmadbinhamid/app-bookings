@@ -67,8 +67,23 @@ export function TimePopover({ value, onChange, stepMinutes = 15, className }: Ti
         createPortal(
           <div
             ref={popoverRef}
-            style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999 }}
+            style={{
+              position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: pos.width, zIndex: 9999,
+              // Radix's modal Dialog sets `body.style.pointerEvents = "none"` while
+              // open and only re-enables "auto" on its own DialogContent node. This
+              // popover portals straight to document.body as a sibling, so without
+              // this override it silently inherits "none" — clicks and wheel-scroll
+              // both no-op with no visual sign anything is wrong.
+              pointerEvents: "auto",
+            }}
             className="rounded border border-field-border bg-popover shadow-md p-1.5 max-h-60 overflow-y-auto animate-in fade-in-0 zoom-in-95"
+            // Radix's modal Dialog also locks page scroll via react-remove-scroll,
+            // which blocks wheel events on anything outside the Dialog's own content
+            // node — this portal is a document.body sibling, so it gets caught too.
+            // Driving scrollTop ourselves sidesteps that block instead of fighting it.
+            onWheel={(e) => {
+              e.currentTarget.scrollTop += e.deltaY;
+            }}
           >
             <div ref={listRef}>
               {times.map((t) => (

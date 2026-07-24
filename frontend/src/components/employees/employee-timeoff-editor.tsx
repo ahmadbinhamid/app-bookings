@@ -64,7 +64,7 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
       ) : timeOff.length === 0 ? (
         <p className="text-body-2 text-content-secondary italic">No time off scheduled.</p>
       ) : (
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2.5 max-h-70 overflow-y-auto">
           {timeOff.map((t) => (
             <div key={t.id} className="flex items-center gap-3.5 rounded-md border border-border p-3.5">
               <div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-700">

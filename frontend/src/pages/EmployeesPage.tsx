@@ -31,6 +31,7 @@ export default function EmployeesPage() {
     return (
       <div className="p-6">
         <EmptyState
+          variant="hero"
           icon={Users}
           title="No location yet"
           description="Employees are synced from FlowPOS per location — once sync has run, they'll show up here."
@@ -60,6 +61,7 @@ export default function EmployeesPage() {
         <p className="text-body-2 text-content-secondary">Loading…</p>
       ) : employees.length === 0 ? (
         <EmptyState
+          variant="hero"
           icon={Users}
           title="No employees yet"
           description="Employees appear here automatically once FlowPOS sync has run for this location."

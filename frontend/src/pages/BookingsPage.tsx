@@ -77,16 +77,26 @@ export default function BookingsPage() {
   if (!selectedLocationId) {
     return (
       <div className="p-6">
-        <EmptyState icon={CalendarDays} title="No location yet" description="Bookings are managed per location." />
+        <EmptyState variant="hero" icon={CalendarDays} title="No location yet" description="Bookings are managed per location." />
       </div>
     );
   }
 
   const shown = statusFilter === "all" ? bookings : bookings.filter((b) => b.status === statusFilter);
+  const hasFilters = Boolean(range.from || range.to) || statusFilter !== "all";
+  // Nothing to filter when the location has zero bookings — only show the
+  // date/status controls once there's something (or a filter) for them to act on.
+  const showToolbar = isLoading || hasFilters || bookings.length > 0;
+  const isTrueEmpty = !isLoading && !hasFilters && bookings.length === 0;
 
   function openReschedule(bookingId: string, serviceIds: string[]) {
     setViewingBookingId(undefined);
     setRescheduling({ bookingId, serviceIds });
+  }
+
+  function clearFilters() {
+    setRange({ from: null, to: null });
+    setStatusFilter("all");
   }
 
   return (
@@ -105,30 +115,47 @@ export default function BookingsPage() {
         </Button>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <DateRangePopover value={range} onChange={setRange} className="w-full sm:w-64" />
+      {showToolbar && (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <DateRangePopover value={range} onChange={setRange} className="w-full sm:w-64" />
 
-        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
-          <SelectTrigger className="w-full sm:w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_FILTERS.map((f) => (
-              <SelectItem key={f} value={f}>{f === "all" ? "All statuses" : BOOKING_STATUS[f].label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
+            <SelectTrigger className="w-full sm:w-44">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_FILTERS.map((f) => (
+                <SelectItem key={f} value={f}>{f === "all" ? "All statuses" : BOOKING_STATUS[f].label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-body-2 text-content-secondary">Loading…</p>
       ) : shown.length === 0 ? (
-        <EmptyState
-          icon={CalendarDays}
-          title="No bookings in this range"
-          description="Try widening the date range, or create a new booking to get started."
-          action={<Button size="sm" onClick={() => setWizardOpen(true)}><Plus className="size-3.5" />New Booking</Button>}
-        />
+        isTrueEmpty ? (
+          <EmptyState
+            variant="hero"
+            icon={CalendarDays}
+            title="No bookings yet"
+            description="Create your first booking to get started."
+            action={<Button onClick={() => setWizardOpen(true)}><Plus className="size-4" />New Booking</Button>}
+          />
+        ) : (
+          <EmptyState
+            icon={CalendarDays}
+            title="No bookings match these filters"
+            description="Try widening the date range or clearing the status filter."
+            action={
+              <div className="flex items-center gap-2">
+                <Button size="sm" variant="secondary" onClick={clearFilters}>Clear filters</Button>
+                <Button size="sm" onClick={() => setWizardOpen(true)}><Plus className="size-3.5" />New Booking</Button>
+              </div>
+            }
+          />
+        )
       ) : (
         <div className="rounded-md border border-border bg-card shadow-card overflow-x-auto">
           <Table className="min-w-205">
