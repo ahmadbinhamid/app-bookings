@@ -17,7 +17,7 @@ import { proposeBooking, confirmBooking, rescheduleBooking, listServices, listEm
 import { queryKeys } from "@/lib/query-keys";
 import { serviceVisual } from "@/constants/service-visuals";
 import { cn, formatMoney, formatDuration, formatTime, formatTimeRange, buildTimeline, toISODateLocal, combineDateAndMinutes } from "@/utils";
-import { useLocationContext } from "@/contexts/location-context";
+import { useLocationTimezone } from "@/hooks/use-location-timezone";
 import { type Proposal, type Service, type Employee } from "@/types";
 
 interface BookingWizardProps {
@@ -44,8 +44,7 @@ function defaultEarliest(): { date: string; minutes: number } {
 export function BookingWizard({ open, onClose, locationId, bookingId, initialServiceIds }: BookingWizardProps) {
   const qc = useQueryClient();
   const isReschedule = Boolean(bookingId);
-  const { selectedLocation } = useLocationContext();
-  const timeZone = selectedLocation?.timezone;
+  const timeZone = useLocationTimezone();
 
   const [step, setStep] = useState<Step>("select");
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);

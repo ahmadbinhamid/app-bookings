@@ -10,6 +10,7 @@ import { ServiceCard, ServiceCardSkeleton } from "@/components/services/service-
 import { ServiceForm } from "@/components/services/service-form";
 import { ServiceAssignmentsDialog } from "@/components/services/service-assignments-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageFallback } from "@/components/ui/page-fallback";
 import { useLocationContext } from "@/contexts/location-context";
 
 const DEFAULT_LIMIT = 18; // 3 cols × 6 rows
@@ -47,7 +48,7 @@ export default function ServicesPage() {
     }
   }, [data?.meta, page]);
 
-  if (locationsLoading) return null;
+  if (locationsLoading) return <PageFallback />;
   if (!selectedLocationId) {
     return (
       <div className="p-6">

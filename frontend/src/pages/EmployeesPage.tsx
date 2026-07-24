@@ -9,6 +9,7 @@ import { listEmployees } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type Employee } from "@/types";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageFallback } from "@/components/ui/page-fallback";
 import { PersonAvatar } from "@/components/ui/person-avatar";
 import { EmployeeDetailDialog } from "@/components/employees/employee-detail-dialog";
 import { useLocationContext } from "@/contexts/location-context";
@@ -26,7 +27,7 @@ export default function EmployeesPage() {
     enabled: Boolean(selectedLocationId),
   });
 
-  if (locationsLoading) return null;
+  if (locationsLoading) return <PageFallback />;
   if (!selectedLocationId) {
     return (
       <div className="p-6">

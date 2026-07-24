@@ -10,12 +10,14 @@ import { Plus, CalendarDays } from "lucide-react";
 import { listBookings, listEmployees, listServices } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PageFallback } from "@/components/ui/page-fallback";
 import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BookingTimeline } from "@/components/ui/booking-timeline";
 import { DateRangePopover, type SimpleDateRange } from "@/components/ui/calendar-popover";
 import { BookingWizard } from "@/components/bookings/booking-wizard";
 import { BookingDetailDialog } from "@/components/bookings/booking-detail-dialog";
 import { useLocationContext } from "@/contexts/location-context";
+import { useLocationTimezone } from "@/hooks/use-location-timezone";
 import { BOOKING_STATUS } from "@/constants";
 import { cn, formatMoney, buildTimeline } from "@/utils";
 import { serviceVisual } from "@/constants/service-visuals";
@@ -44,8 +46,8 @@ function activeSegments(booking: Booking) {
 }
 
 export default function BookingsPage() {
-  const { selectedLocationId, selectedLocation, isLoading: locationsLoading } = useLocationContext();
-  const timeZone = selectedLocation?.timezone;
+  const { selectedLocationId, isLoading: locationsLoading } = useLocationContext();
+  const timeZone = useLocationTimezone();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [rescheduling, setRescheduling] = useState<{ bookingId: string; serviceIds: string[] } | undefined>();
   const [viewingBookingId, setViewingBookingId] = useState<string | undefined>();
@@ -74,7 +76,7 @@ export default function BookingsPage() {
   const employeeByID = new Map(employees.map((e) => [e.id, e]));
   const serviceByID = new Map((servicesPage?.data ?? []).map((s) => [s.id, s]));
 
-  if (locationsLoading) return null;
+  if (locationsLoading) return <PageFallback />;
   if (!selectedLocationId) {
     return (
       <div className="p-6">
@@ -257,7 +259,12 @@ export default function BookingsPage() {
                         </span>
                       ) : timeline ? (
                         <div className="w-24">
-                          <BookingTimeline timeline={timeline} segments={segs.map((s) => ({ key: s.id, name: "", start: s.start_time, end: s.end_time }))} variant="mini" />
+                          <BookingTimeline
+                            timeline={timeline}
+                            segments={segs.map((s) => ({ key: s.id, name: serviceByID.get(s.service_id)?.name ?? s.service_id, start: s.start_time, end: s.end_time }))}
+                            variant="mini"
+                            timeZone={timeZone}
+                          />
                           <div className="mt-1.5 text-body-3 text-content-secondary tabular-nums">
                             <div className="whitespace-nowrap">{timeline.startLabel} – {timeline.endLabel}</div>
                             {timeline.totalGapMinutes > 0 && (

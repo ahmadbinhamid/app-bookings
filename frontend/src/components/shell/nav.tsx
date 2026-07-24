@@ -31,13 +31,14 @@ export function AppNav() {
                         <div
                           className={cn(
                             "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+                            "group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0",
                             isActive
                               ? "bg-primary/10 font-medium text-primary"
                               : "text-content-secondary hover:bg-muted hover:text-foreground"
                           )}
                         >
                           <Icon className="size-4 shrink-0" />
-                          <span className="truncate">{label}</span>
+                          <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
                         </div>
                       )}
                     </NavLink>

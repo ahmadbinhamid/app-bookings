@@ -9,7 +9,7 @@ import { TimePopover } from "@/components/ui/time-popover";
 import { listTimeOff, createTimeOff, deleteTimeOff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { combineDateAndMinutes, toISODateLocal } from "@/utils";
-import { useLocationContext } from "@/contexts/location-context";
+import { useLocationTimezone } from "@/hooks/use-location-timezone";
 
 interface EmployeeTimeOffEditorProps {
   locationId: string;
@@ -19,8 +19,7 @@ interface EmployeeTimeOffEditorProps {
 export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOffEditorProps) {
   const qc = useQueryClient();
   const key = queryKeys.timeOff(locationId, employeeId);
-  const { selectedLocation } = useLocationContext();
-  const timeZone = selectedLocation?.timezone;
+  const timeZone = useLocationTimezone();
 
   const { data: timeOff = [], isLoading } = useQuery({
     queryKey: key,

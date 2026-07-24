@@ -14,7 +14,7 @@ import { BookingTimeline } from "@/components/ui/booking-timeline";
 import { BOOKING_STATUS } from "@/constants";
 import { serviceVisual } from "@/constants/service-visuals";
 import { cn, formatMoney, formatTimeRange, buildTimeline } from "@/utils";
-import { useLocationContext } from "@/contexts/location-context";
+import { useLocationTimezone } from "@/hooks/use-location-timezone";
 
 interface BookingDetailDialogProps {
   open: boolean;
@@ -26,8 +26,7 @@ interface BookingDetailDialogProps {
 
 export function BookingDetailDialog({ open, onClose, locationId, bookingId, onReschedule }: BookingDetailDialogProps) {
   const qc = useQueryClient();
-  const { selectedLocation } = useLocationContext();
-  const timeZone = selectedLocation?.timezone;
+  const timeZone = useLocationTimezone();
 
   const { data: booking } = useQuery({
     queryKey: bookingId ? queryKeys.booking(locationId, bookingId) : ["booking", "none"],
