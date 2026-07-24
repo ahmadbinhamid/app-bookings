@@ -9,6 +9,7 @@ import { TimePopover } from "@/components/ui/time-popover";
 import { listTimeOff, createTimeOff, deleteTimeOff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { combineDateAndMinutes, toISODateLocal } from "@/utils";
+import { useLocationContext } from "@/contexts/location-context";
 
 interface EmployeeTimeOffEditorProps {
   locationId: string;
@@ -18,6 +19,8 @@ interface EmployeeTimeOffEditorProps {
 export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOffEditorProps) {
   const qc = useQueryClient();
   const key = queryKeys.timeOff(locationId, employeeId);
+  const { selectedLocation } = useLocationContext();
+  const timeZone = selectedLocation?.timezone;
 
   const { data: timeOff = [], isLoading } = useQuery({
     queryKey: key,
@@ -72,9 +75,9 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
               </div>
               <div className="flex-1 min-w-0">
                 <div className="font-medium text-body-2 text-foreground">
-                  {new Date(t.start_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                  {new Date(t.start_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone })}
                   {" – "}
-                  {new Date(t.end_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                  {new Date(t.end_datetime).toLocaleString([], { dateStyle: "medium", timeStyle: "short", timeZone })}
                 </div>
                 {t.reason && <div className="text-body-3 text-content-secondary mt-0.5">{t.reason}</div>}
               </div>

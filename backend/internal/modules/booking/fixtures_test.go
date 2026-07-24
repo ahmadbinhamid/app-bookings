@@ -64,6 +64,19 @@ func seedAssignment(t *testing.T, conn *sql.DB, employeeID, serviceID string) {
 	}
 }
 
+// seedAllDaySchedule gives an employee a wide-open 00:00-23:59:59 schedule on
+// every day of the week. Confirm/Reschedule now re-verify each segment
+// against EMPLOYEE_SCHEDULE, so tests exercising cancel/complete/reschedule
+// mechanics (which don't care about schedule boundaries themselves, and use
+// a dynamically-computed "now + 48h" start whose weekday isn't fixed) need
+// this instead of a single seedSchedule call for one specific day.
+func seedAllDaySchedule(t *testing.T, conn *sql.DB, employeeID string) {
+	t.Helper()
+	for day := 0; day < 7; day++ {
+		seedSchedule(t, conn, employeeID, day, "00:00:00", "23:59:59")
+	}
+}
+
 func seedSchedule(t *testing.T, conn *sql.DB, employeeID string, dayOfWeek int, start, end string) {
 	t.Helper()
 	if _, err := conn.Exec(`
@@ -99,6 +112,21 @@ func seedRawBooking(t *testing.T, conn *sql.DB, locationID, status string) strin
 		t.Fatalf("seed raw booking: %v", err)
 	}
 	return id
+}
+
+// safeFutureTime returns a future instant `daysAhead` days out, anchored to
+// a fixed 10:00 UTC time-of-day rather than "now"'s own clock time.
+// Confirm/Reschedule now re-verify each segment against EMPLOYEE_SCHEDULE,
+// which never lets a segment span two calendar days (design doc: never
+// split across midnight) — anchoring test times directly to time.Now() risks
+// an intermittent flake whenever the real wall-clock time a test happens to
+// run at is close enough to midnight that start+buffer crosses into the
+// next day. 10:00 UTC plus whatever small intra-day offset a test adds on
+// top always stays safely inside one day's 00:00-23:59:59 schedule window
+// (see seedAllDaySchedule).
+func safeFutureTime(daysAhead int) time.Time {
+	base := time.Now().Add(time.Duration(daysAhead) * 24 * time.Hour)
+	return time.Date(base.Year(), base.Month(), base.Day(), 10, 0, 0, 0, time.UTC)
 }
 
 // nextWeekday returns the next date STRICTLY AFTER `from` (i.e. starting

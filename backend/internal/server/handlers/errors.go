@@ -54,10 +54,12 @@ func respondErr(c *gin.Context, err error) {
 		errors.Is(err, location.ErrInvalidTimezone),
 		errors.Is(err, booking.ErrLocationTimezoneUnset),
 		errors.Is(err, solver.ErrNoServicesRequested),
-		errors.Is(err, booking.ErrInvalidProposal):
+		errors.Is(err, booking.ErrInvalidProposal),
+		errors.Is(err, booking.ErrInvalidSegment):
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": err.Error()})
 	case errors.Is(err, schedules.ErrOverlap),
 		errors.Is(err, booking.ErrSlotNoLongerAvailable),
+		errors.Is(err, booking.ErrEmployeeNoLongerAvailable),
 		errors.Is(err, booking.ErrAlreadyCancelled),
 		errors.Is(err, booking.ErrAlreadyCompleted):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": errCode(err)})
@@ -77,6 +79,8 @@ func errCode(err error) string {
 	switch {
 	case errors.Is(err, booking.ErrSlotNoLongerAvailable):
 		return "SLOT_NO_LONGER_AVAILABLE"
+	case errors.Is(err, booking.ErrEmployeeNoLongerAvailable):
+		return "EMPLOYEE_NO_LONGER_AVAILABLE"
 	case errors.Is(err, booking.ErrAlreadyCancelled):
 		return "ALREADY_CANCELLED"
 	case errors.Is(err, booking.ErrAlreadyCompleted):

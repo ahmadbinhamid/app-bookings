@@ -44,7 +44,8 @@ function activeSegments(booking: Booking) {
 }
 
 export default function BookingsPage() {
-  const { selectedLocationId, isLoading: locationsLoading } = useLocationContext();
+  const { selectedLocationId, selectedLocation, isLoading: locationsLoading } = useLocationContext();
+  const timeZone = selectedLocation?.timezone;
   const [wizardOpen, setWizardOpen] = useState(false);
   const [rescheduling, setRescheduling] = useState<{ bookingId: string; serviceIds: string[] } | undefined>();
   const [viewingBookingId, setViewingBookingId] = useState<string | undefined>();
@@ -181,7 +182,8 @@ export default function BookingsPage() {
                     name: serviceByID.get(s.service_id)?.name ?? s.service_id,
                     start: s.start_time,
                     end: s.end_time,
-                  }))
+                  })),
+                  timeZone
                 );
                 const status = BOOKING_STATUS[b.status];
 
@@ -271,7 +273,7 @@ export default function BookingsPage() {
 
                     <TableCell className="tabular-nums text-content-secondary font-medium">
                       {b.window_start
-                        ? new Date(b.window_start).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                        ? new Date(b.window_start).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })
                         : "—"}
                     </TableCell>
 

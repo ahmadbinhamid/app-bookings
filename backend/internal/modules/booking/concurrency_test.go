@@ -26,7 +26,7 @@ func TestConcurrentConfirm_ExactlyOneWins(t *testing.T) {
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
 	for iter := 0; iter < 10; iter++ {
-		start := time.Now().Add(time.Duration(48+iter) * time.Hour).Truncate(time.Minute)
+		start := safeFutureTime(2).Add(time.Duration(iter) * time.Hour)
 		end := start.Add(30 * time.Minute)
 		blockedUntil := end.Add(10 * time.Minute)
 
@@ -92,7 +92,7 @@ func TestConcurrentRescheduleVsConfirm_ExactlyOneWins(t *testing.T) {
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
-	t1 := time.Now().Add(72 * time.Hour).Truncate(time.Minute)
+	t1 := safeFutureTime(3)
 	a, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Booking A",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: t1, End: t1.Add(30 * time.Minute), BlockedUntil: t1.Add(40 * time.Minute), Price: 25}},
@@ -189,7 +189,7 @@ func TestConcurrentRescheduleAndCancel_SameBooking_NoHalfUpdatedState(t *testing
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
-	start := time.Now().Add(96 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(4)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},

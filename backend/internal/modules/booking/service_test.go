@@ -115,8 +115,9 @@ func TestConfirm_HappyPath(t *testing.T) {
 	barber := seedEmployeeAt(t, conn, locID, "Barber A")
 	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
 	seedAssignment(t, conn, barber, haircut)
+	seedAllDaySchedule(t, conn, barber)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	end := start.Add(30 * time.Minute)
 	blockedUntil := end.Add(10 * time.Minute)
 
@@ -156,7 +157,7 @@ func TestConfirm_InvalidProposal_PairwiseOverlap_Rejected(t *testing.T) {
 	seedAssignment(t, conn, barber, haircut)
 	seedAssignment(t, conn, barber, trim)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 
 	_, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane Doe",
@@ -188,7 +189,7 @@ func TestConfirm_SlotNoLongerAvailable_ExistingSegmentConflicts(t *testing.T) {
 	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
 	seedAssignment(t, conn, barber, haircut)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	priorBooking := seedRawBooking(t, conn, locID, "confirmed")
 	seedRawSegment(t, conn, priorBooking, barber, haircut, "booked", start, start.Add(30*time.Minute), start.Add(40*time.Minute), 25)
 
@@ -212,6 +213,328 @@ func TestConfirm_SlotNoLongerAvailable_ExistingSegmentConflicts(t *testing.T) {
 	}
 }
 
+// TestConfirm_PriceTampering_ServerPriceWins covers the "fully optimistic"
+// model's sharpest edge: nothing stops a client from calling /propose, then
+// POSTing /confirm with the same segments but an arbitrary price. Confirm
+// must never trust seg.Price — the persisted price must always be the
+// service's own current price, regardless of what the client submitted.
+func TestConfirm_PriceTampering_ServerPriceWins(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn) // Haircut costs 25
+
+	start := safeFutureTime(2)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Bargain Hunter",
+		Segments: []ProposedSegment{
+			// Real price is 25 — try to confirm it for a cent.
+			{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 0.01},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+	if b.Segments[0].OriginalPrice != 25 || b.Segments[0].Price != 25 {
+		t.Fatalf("expected the server's real price (25) to win over the tampered client price (0.01), got %+v", b.Segments[0])
+	}
+	if b.TotalPrice != 25 {
+		t.Fatalf("expected total_price 25 (server price), got %v", b.TotalPrice)
+	}
+}
+
+// TestConfirm_InvalidSegment_ServiceBelongsToDifferentLocation covers the
+// cross-location gap: Propose already checks this, but Confirm never
+// repeated it, so a client authorized for locID A submitting a service that
+// actually belongs to locID B went through untouched before this fix.
+func TestConfirm_InvalidSegment_ServiceBelongsToDifferentLocation(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locA, barber, _ := oneEmployeeOneService(t, conn)
+	locB := seedLocationTZ(t, conn, "UTC", true)
+	otherLocationsHaircut := seedServiceAt(t, conn, locB, "Haircut", 30, 10, 25)
+
+	start := safeFutureTime(2)
+	_, err := svc.Confirm(locA, nil, ConfirmInput{
+		CustomerName: "Cross Location Customer",
+		Segments: []ProposedSegment{
+			{ServiceID: otherLocationsHaircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25},
+		},
+	})
+	if err != ErrInvalidSegment {
+		t.Fatalf("expected ErrInvalidSegment, got %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM bookings WHERE location_id = ? AND customer_name = 'Cross Location Customer'`, locA).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no booking to be persisted, found %d", count)
+	}
+}
+
+// TestConfirm_InvalidSegment_EmployeeDeactivatedAfterPropose is the same
+// gap as the schedule/time-off one, for a different table: Propose filters
+// to active + qualified employees via QualifiedActiveEmployeeIDs, but that
+// was never re-checked at Confirm time.
+func TestConfirm_InvalidSegment_EmployeeDeactivatedAfterPropose(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+
+	start := safeFutureTime(2)
+
+	// Another admin deactivates the employee (e.g. they left) between
+	// Propose and Confirm.
+	if _, err := conn.Exec(`UPDATE employees SET active = FALSE WHERE id = ?`, barber); err != nil {
+		t.Fatalf("deactivate employee: %v", err)
+	}
+
+	_, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Stale Proposal Customer 3",
+		Segments: []ProposedSegment{
+			{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25},
+		},
+	})
+	if err != ErrInvalidSegment {
+		t.Fatalf("expected ErrInvalidSegment, got %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM bookings WHERE location_id = ? AND customer_name = 'Stale Proposal Customer 3'`, locID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no booking to be persisted, found %d", count)
+	}
+}
+
+// TestConfirm_InvalidSegment_EmployeeUnassignedFromService covers the other
+// half: the employee is still active, but the EMPLOYEE_SERVICE assignment
+// that qualified them for this service was removed between Propose and
+// Confirm.
+func TestConfirm_InvalidSegment_EmployeeUnassignedFromService(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+
+	start := safeFutureTime(2)
+
+	if _, err := conn.Exec(`DELETE FROM employee_services WHERE employee_id = ? AND service_id = ?`, barber, haircut); err != nil {
+		t.Fatalf("remove assignment: %v", err)
+	}
+
+	_, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Stale Proposal Customer 4",
+		Segments: []ProposedSegment{
+			{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25},
+		},
+	})
+	if err != ErrInvalidSegment {
+		t.Fatalf("expected ErrInvalidSegment, got %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM bookings WHERE location_id = ? AND customer_name = 'Stale Proposal Customer 4'`, locID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no booking to be persisted, found %d", count)
+	}
+}
+
+// TestReschedule_PriceTampering_ServerPriceWins is the Reschedule-side
+// equivalent of TestConfirm_PriceTampering_ServerPriceWins, specifically for
+// a NEWLY-ADDED service (the price-carryover path for unchanged services
+// already only ever uses DB-sourced values, never client input).
+func TestReschedule_PriceTampering_ServerPriceWins(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID := seedLocationTZ(t, conn, "UTC", true)
+	barber := seedEmployeeAt(t, conn, locID, "Barber A")
+	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
+	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
+	seedAssignment(t, conn, barber, haircut)
+	seedAssignment(t, conn, barber, facial)
+	seedAllDaySchedule(t, conn, barber)
+
+	start := safeFutureTime(2)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	// Reschedule keeps the haircut AND adds a facial (real price 40) but
+	// tries to confirm it for a cent.
+	after, err := svc.Reschedule(b.ID, RescheduleInput{
+		Segments: []ProposedSegment{
+			{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25},
+			{ServiceID: facial, EmployeeID: barber, Start: start.Add(40 * time.Minute), End: start.Add(70 * time.Minute), BlockedUntil: start.Add(80 * time.Minute), Price: 0.01},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reschedule: %v", err)
+	}
+	surviving := nonCancelled(after.Segments)
+	if len(surviving) != 2 {
+		t.Fatalf("expected 2 surviving segments, got %d: %+v", len(surviving), after.Segments)
+	}
+	facialSeg := surviving[1]
+	if facialSeg.OriginalPrice != 40 || facialSeg.Price != 40 {
+		t.Fatalf("expected the server's real price (40) to win over the tampered client price (0.01), got %+v", facialSeg)
+	}
+}
+
+// TestConfirm_EmployeeNoLongerAvailable_ScheduleRemovedAfterPropose covers
+// the gap FindConflicts alone doesn't close: between Propose and Confirm,
+// another admin edits the SAME employee's EMPLOYEE_SCHEDULE (here, removes
+// it entirely for that day) rather than booking a conflicting segment.
+// FindConflicts would see no other booking and let this through; the new
+// schedule/time-off re-check must catch it instead.
+func TestConfirm_EmployeeNoLongerAvailable_ScheduleRemovedAfterPropose(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+
+	locID := seedLocationTZ(t, conn, "UTC", true)
+	barber := seedEmployeeAt(t, conn, locID, "Barber A")
+	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
+	seedAssignment(t, conn, barber, haircut)
+
+	monday := nextWeekday(time.Now().UTC(), time.Monday)
+	seedSchedule(t, conn, barber, int(time.Monday), "09:00:00", "17:00:00")
+
+	proposal, err := svc.Propose(locID, ProposeInput{
+		Services:      []ServiceRequest{{ServiceID: haircut}},
+		EarliestStart: monday.Add(10 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if len(proposal.Segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(proposal.Segments))
+	}
+
+	// Another admin removes the employee's working hours for that day
+	// between Propose and Confirm — no other booking conflicts, so
+	// FindConflicts alone would let this through.
+	if _, err := conn.Exec(`DELETE FROM employee_schedules WHERE employee_id = ?`, barber); err != nil {
+		t.Fatalf("remove schedule: %v", err)
+	}
+
+	_, err = svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Stale Proposal Customer",
+		Segments:     proposal.Segments,
+	})
+	if err != ErrEmployeeNoLongerAvailable {
+		t.Fatalf("expected ErrEmployeeNoLongerAvailable, got %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM bookings WHERE location_id = ? AND customer_name = 'Stale Proposal Customer'`, locID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no booking to be persisted after a stale proposal, found %d", count)
+	}
+}
+
+// TestConfirm_EmployeeNoLongerAvailable_TimeOffAddedAfterPropose is the
+// other half of the same gap: time off added (rather than the schedule
+// itself changing) between Propose and Confirm.
+func TestConfirm_EmployeeNoLongerAvailable_TimeOffAddedAfterPropose(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+
+	locID := seedLocationTZ(t, conn, "UTC", true)
+	barber := seedEmployeeAt(t, conn, locID, "Barber A")
+	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 10, 25)
+	seedAssignment(t, conn, barber, haircut)
+
+	monday := nextWeekday(time.Now().UTC(), time.Monday)
+	seedSchedule(t, conn, barber, int(time.Monday), "09:00:00", "17:00:00")
+
+	proposal, err := svc.Propose(locID, ProposeInput{
+		Services:      []ServiceRequest{{ServiceID: haircut}},
+		EarliestStart: monday.Add(10 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	seg := proposal.Segments[0]
+
+	// Another admin adds time off overlapping the proposed segment.
+	if _, err := conn.Exec(`
+		INSERT INTO employee_time_off (id, employee_id, start_datetime, end_datetime, created_at)
+		VALUES (?, ?, ?, ?, NOW())
+	`, newUUID(), barber, seg.Start.Add(-time.Hour), seg.End.Add(time.Hour)); err != nil {
+		t.Fatalf("seed time off: %v", err)
+	}
+
+	_, err = svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Stale Proposal Customer 2",
+		Segments:     proposal.Segments,
+	})
+	if err != ErrEmployeeNoLongerAvailable {
+		t.Fatalf("expected ErrEmployeeNoLongerAvailable, got %v", err)
+	}
+
+	var count int
+	if err := conn.QueryRow(`SELECT COUNT(*) FROM bookings WHERE location_id = ? AND customer_name = 'Stale Proposal Customer 2'`, locID).Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no booking to be persisted after a stale proposal, found %d", count)
+	}
+}
+
+// TestReschedule_EmployeeNoLongerAvailable_ScheduleRemovedAfterPropose is
+// the same gap on the Reschedule path — the shared helper both Confirm and
+// Reschedule call must be wired into both, not just Confirm.
+func TestReschedule_EmployeeNoLongerAvailable_ScheduleRemovedAfterPropose(t *testing.T) {
+	conn := connectOrSkip(t)
+	svc := newBookingService(conn)
+	locID, barber, haircut := oneEmployeeOneService(t, conn)
+
+	start := safeFutureTime(2)
+	b, err := svc.Confirm(locID, nil, ConfirmInput{
+		CustomerName: "Jane",
+		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	// oneEmployeeOneService seeds a wide-open all-day schedule — remove it
+	// entirely before attempting the reschedule.
+	if _, err := conn.Exec(`DELETE FROM employee_schedules WHERE employee_id = ?`, barber); err != nil {
+		t.Fatalf("remove schedule: %v", err)
+	}
+
+	newStart := start.Add(4 * time.Hour)
+	_, err = svc.Reschedule(b.ID, RescheduleInput{
+		Segments: []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: newStart, End: newStart.Add(30 * time.Minute), BlockedUntil: newStart.Add(40 * time.Minute), Price: 25}},
+	})
+	if err != ErrEmployeeNoLongerAvailable {
+		t.Fatalf("expected ErrEmployeeNoLongerAvailable, got %v", err)
+	}
+
+	// The original segment must be untouched — same ROLLBACK guarantee as
+	// TestReschedule_ConflictWithAnotherBooking_OriginalUntouched.
+	afterA, err := svc.GetByID(b.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(afterA.Segments) != 1 {
+		t.Fatalf("expected booking to still have exactly 1 segment, got %d", len(afterA.Segments))
+	}
+	if afterA.Segments[0].Status != "booked" || !afterA.Segments[0].StartTime.Equal(start) {
+		t.Fatalf("expected the original segment untouched (status=booked, original start), got %+v", afterA.Segments[0])
+	}
+}
+
 // --- Cancel ---
 
 func TestCancelBooking_CascadesToAllSegments(t *testing.T) {
@@ -219,7 +542,7 @@ func TestCancelBooking_CascadesToAllSegments(t *testing.T) {
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -253,8 +576,9 @@ func TestCancelBooking_WithCompletedSegment_BookingBecomesCompleted(t *testing.T
 	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
 	seedAssignment(t, conn, barber, haircut)
 	seedAssignment(t, conn, barber, facial)
+	seedAllDaySchedule(t, conn, barber)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments: []ProposedSegment{
@@ -309,8 +633,9 @@ func TestCancelSegment_LeavesRestIntact(t *testing.T) {
 	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
 	seedAssignment(t, conn, barber, haircut)
 	seedAssignment(t, conn, barber, facial)
+	seedAllDaySchedule(t, conn, barber)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments: []ProposedSegment{
@@ -349,7 +674,7 @@ func TestCancelSegment_AlreadyCancelled_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -376,8 +701,9 @@ func TestCompleteSegment_HappyPath_OtherSegmentStillBooked_BookingStaysConfirmed
 	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
 	seedAssignment(t, conn, barber, haircut)
 	seedAssignment(t, conn, barber, facial)
+	seedAllDaySchedule(t, conn, barber)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments: []ProposedSegment{
@@ -414,7 +740,7 @@ func TestCompleteSegment_LastRemainingSegment_BookingBecomesCompleted(t *testing
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -440,7 +766,7 @@ func TestCompleteSegment_AlreadyCompleted_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -460,7 +786,7 @@ func TestCompleteSegment_AlreadyCancelled_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -480,7 +806,7 @@ func TestCancelBooking_AlreadyCompleted_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -503,7 +829,7 @@ func TestReschedule_PriceCarryover_UnchangedService(t *testing.T) {
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -551,8 +877,9 @@ func TestReschedule_NewlyAddedService_FreshPriceSnapshot(t *testing.T) {
 	facial := seedServiceAt(t, conn, locID, "Facial", 30, 10, 40)
 	seedAssignment(t, conn, barber, haircut)
 	seedAssignment(t, conn, barber, facial)
+	seedAllDaySchedule(t, conn, barber)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -585,7 +912,7 @@ func TestReschedule_AlreadyCancelled_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	b, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Jane",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -611,7 +938,7 @@ func TestReschedule_ConflictWithAnotherBooking_OriginalUntouched(t *testing.T) {
 	svc := newBookingService(conn)
 	locID, barber, haircut := oneEmployeeOneService(t, conn)
 
-	start := time.Now().Add(48 * time.Hour).Truncate(time.Minute)
+	start := safeFutureTime(2)
 	a, err := svc.Confirm(locID, nil, ConfirmInput{
 		CustomerName: "Booking A",
 		Segments:     []ProposedSegment{{ServiceID: haircut, EmployeeID: barber, Start: start, End: start.Add(30 * time.Minute), BlockedUntil: start.Add(40 * time.Minute), Price: 25}},
@@ -667,5 +994,6 @@ func oneEmployeeOneService(t *testing.T, conn *sql.DB) (locationID, employeeID, 
 	employeeID = seedEmployeeAt(t, conn, locationID, "Barber A")
 	serviceID = seedServiceAt(t, conn, locationID, "Haircut", 30, 10, 25)
 	seedAssignment(t, conn, employeeID, serviceID)
+	seedAllDaySchedule(t, conn, employeeID)
 	return locationID, employeeID, serviceID
 }

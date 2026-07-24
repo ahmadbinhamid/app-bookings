@@ -8,11 +8,13 @@ import { X, Check, RefreshCw, CalendarOff } from "lucide-react";
 import { getBooking, cancelBooking, cancelBookingSegment, completeBookingSegment, listEmployees, listServices } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type ApiError } from "@/lib/api/client";
+import { DialogBody } from "@/components/ui/dialog-body";
 import { PersonAvatar } from "@/components/ui/person-avatar";
 import { BookingTimeline } from "@/components/ui/booking-timeline";
 import { BOOKING_STATUS } from "@/constants";
 import { serviceVisual } from "@/constants/service-visuals";
 import { cn, formatMoney, formatTimeRange, buildTimeline } from "@/utils";
+import { useLocationContext } from "@/contexts/location-context";
 
 interface BookingDetailDialogProps {
   open: boolean;
@@ -24,6 +26,8 @@ interface BookingDetailDialogProps {
 
 export function BookingDetailDialog({ open, onClose, locationId, bookingId, onReschedule }: BookingDetailDialogProps) {
   const qc = useQueryClient();
+  const { selectedLocation } = useLocationContext();
+  const timeZone = selectedLocation?.timezone;
 
   const { data: booking } = useQuery({
     queryKey: bookingId ? queryKeys.booking(locationId, bookingId) : ["booking", "none"],
@@ -91,13 +95,14 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
           name: serviceByID.get(s.service_id)?.name ?? s.service_id,
           start: s.start_time,
           end: s.end_time,
-        }))
+        })),
+        timeZone
       )
     : null;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="w-[calc(100%-2rem)] max-w-lg">
+      <DialogContent className="w-[calc(100%-2rem)] max-w-xl">
         <DialogHeader>
           <div className="flex items-start gap-3.5">
             <PersonAvatar name={booking.customer_name} size="lg" />
@@ -115,7 +120,7 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
           </div>
         </DialogHeader>
 
-        <DialogBodyContent>
+        <DialogBody>
           {isEmpty ? (
             <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border bg-muted/30 p-8 text-center">
               <div className="flex size-12 items-center justify-center rounded-md bg-destructive/10 text-destructive">
@@ -143,6 +148,7 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
                     end: s.end_time,
                   }))}
                   variant="large"
+                  timeZone={timeZone}
                 />
               )}
 
@@ -171,7 +177,7 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
                           {cancelled && <Badge variant="destructive">Cancelled</Badge>}
                         </div>
                         <div className="text-body-3 text-content-secondary mt-0.5">
-                          {employee} · {formatTimeRange(seg.start_time, seg.end_time)}
+                          {employee} · {formatTimeRange(seg.start_time, seg.end_time, timeZone)}
                         </div>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto sm:ml-0">
@@ -214,7 +220,7 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
               </div>
             </div>
           )}
-        </DialogBodyContent>
+        </DialogBody>
 
         <DialogFooter>
           {booking.status === "confirmed" && (
@@ -242,8 +248,4 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
       </DialogContent>
     </Dialog>
   );
-}
-
-function DialogBodyContent({ children }: { children: React.ReactNode }) {
-  return <div className="max-h-[60vh] overflow-y-auto py-3">{children}</div>;
 }

@@ -45,6 +45,30 @@ func (r *Repository) QualifiedActiveEmployeeIDs(serviceID string) ([]string, err
 	return out, rows.Err()
 }
 
+// EmployeeEligibleForSegment is the confirm/reschedule-time re-check that a
+// segment's employee could still have legitimately come out of Propose for
+// THIS location: active, still assigned to the segment's service
+// (EMPLOYEE_SERVICE), and belonging to locationID. Runs inside the caller's
+// transaction, after LockEmployees, so it sees the employee row's current
+// (locked, consistent) state rather than a possibly-stale snapshot from a
+// separate connection.
+func (r *Repository) EmployeeEligibleForSegment(tx *sql.Tx, employeeID, serviceID, locationID string) (bool, error) {
+	var discard string
+	err := tx.QueryRow(`
+		SELECT es.id
+		FROM employee_services es
+		JOIN employees e ON e.id = es.employee_id
+		WHERE es.employee_id = ? AND es.service_id = ? AND e.active = TRUE AND e.location_id = ?
+	`, employeeID, serviceID, locationID).Scan(&discard)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // BeginTx starts a transaction — exported so service.go's confirm/cancel/
 // reschedule flows (which need explicit BEGIN/COMMIT/ROLLBACK control, not
 // a single query) can drive it directly.

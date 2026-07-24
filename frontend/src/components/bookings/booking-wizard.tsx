@@ -17,6 +17,7 @@ import { proposeBooking, confirmBooking, rescheduleBooking, listServices, listEm
 import { queryKeys } from "@/lib/query-keys";
 import { serviceVisual } from "@/constants/service-visuals";
 import { cn, formatMoney, formatDuration, formatTime, formatTimeRange, buildTimeline, toISODateLocal, combineDateAndMinutes } from "@/utils";
+import { useLocationContext } from "@/contexts/location-context";
 import { type Proposal, type Service, type Employee } from "@/types";
 
 interface BookingWizardProps {
@@ -43,6 +44,8 @@ function defaultEarliest(): { date: string; minutes: number } {
 export function BookingWizard({ open, onClose, locationId, bookingId, initialServiceIds }: BookingWizardProps) {
   const qc = useQueryClient();
   const isReschedule = Boolean(bookingId);
+  const { selectedLocation } = useLocationContext();
+  const timeZone = selectedLocation?.timezone;
 
   const [step, setStep] = useState<Step>("select");
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
@@ -179,7 +182,8 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
         name: serviceByID.get(seg.service_id)?.name ?? seg.service_id,
         start: seg.start,
         end: seg.end,
-      }))
+      })),
+      timeZone
     );
 
   return (
@@ -308,7 +312,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
               <div className="flex items-start gap-2.5 rounded-md border border-transparent bg-tag-success p-3.5">
                 <CheckCircle2 className="size-4.5 shrink-0 text-tag-success-text" />
                 <p className="text-body-2 text-tag-success-text">
-                  <b>Slots found.</b> First available fit starting {formatTime(proposal.segments[0].start)}. Review
+                  <b>Slots found.</b> First available fit starting {formatTime(proposal.segments[0].start, timeZone)}. Review
                   the timeline below.
                 </p>
               </div>
@@ -322,6 +326,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
                   end: seg.end,
                 }))}
                 variant="large"
+                timeZone={timeZone}
               />
 
               <div className="flex flex-col gap-2">
@@ -339,7 +344,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
                           {employee}
                         </div>
                       </div>
-                      <div className="text-body-2 font-medium tabular-nums">{formatTimeRange(seg.start, seg.end)}</div>
+                      <div className="text-body-2 font-medium tabular-nums">{formatTimeRange(seg.start, seg.end, timeZone)}</div>
                     </div>
                   );
                 })}

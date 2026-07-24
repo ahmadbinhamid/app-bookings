@@ -1,6 +1,7 @@
 package booking
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -119,6 +120,78 @@ func validatePairwise(segments []ProposedSegment) error {
 	return nil
 }
 
+// resolveTimezone loads the location's IANA zone for Confirm/Reschedule's
+// schedule/time-off re-validation — unlike Propose, it does not require
+// TimezoneConfirmed, since by the time we're confirming, a Propose call
+// already passed that gate; a location's timezone changing between the two
+// isn't the failure mode this guards against.
+func (s *Service) resolveTimezone(locationID string) (*time.Location, error) {
+	loc, err := s.locations.GetByID(locationID)
+	if err != nil {
+		return nil, err
+	}
+	tz, err := time.LoadLocation(loc.Timezone)
+	if err != nil {
+		return nil, fmt.Errorf("invalid location timezone %q: %w", loc.Timezone, err)
+	}
+	return tz, nil
+}
+
+// verifySegmentAvailable is the shared confirm/reschedule-time schedule/
+// time-off re-check — both Confirm and Reschedule call this immediately
+// after FindConflicts clears a segment, still inside the same transaction,
+// before anything is inserted. See verifyEmployeeStillAvailable's doc
+// comment for why FindConflicts alone isn't enough.
+func verifySegmentAvailable(tx *sql.Tx, seg ProposedSegment, tz *time.Location) error {
+	ok, err := verifyEmployeeStillAvailable(tx, seg.EmployeeID, seg.Start, seg.BlockedUntil, tz)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrEmployeeNoLongerAvailable
+	}
+	return nil
+}
+
+// verifySegmentIntegrity is the confirm/reschedule-time defense against a
+// tampered or stale ProposedSegment: the design doc's "fully optimistic,
+// client hands back exactly what it was shown" model means nothing in a
+// ConfirmInput/RescheduleInput is trustworthy on its own — there's no
+// server-side session tying it back to the Propose call that produced it.
+// This re-derives the ONLY two things Confirm/Reschedule must never take
+// from the client:
+//   - the price actually charged, always the service's current price (the
+//     client-submitted seg.Price is ignored entirely, so submitting e.g.
+//     price: 0.01 has no effect)
+//   - that the segment could legitimately have come from THIS location's
+//     Propose response: the service belongs to locationID, and the
+//     employee is active, assigned to that service, and belongs to
+//     locationID too
+//
+// Returns the service's real price to use as this segment's price
+// snapshot; callers still apply their own discount-carryover rules on top
+// (Reschedule's unchanged-service case) using DB-sourced values, never this
+// one, so an existing admin discount is preserved correctly.
+func (s *Service) verifySegmentIntegrity(tx *sql.Tx, locationID string, seg ProposedSegment) (float64, error) {
+	svc, err := s.services.Get(seg.ServiceID)
+	if err != nil {
+		return 0, err
+	}
+	if svc.LocationID != locationID {
+		return 0, ErrInvalidSegment
+	}
+
+	eligible, err := s.repo.EmployeeEligibleForSegment(tx, seg.EmployeeID, seg.ServiceID, locationID)
+	if err != nil {
+		return 0, err
+	}
+	if !eligible {
+		return 0, ErrInvalidSegment
+	}
+
+	return svc.Price, nil
+}
+
 func computeWindow(segments []ProposedSegment) (start, end time.Time, total float64) {
 	start, end = segments[0].Start, segments[0].End
 	for _, s := range segments {
@@ -182,6 +255,11 @@ func (s *Service) Confirm(locationID string, adminID *uint64, in ConfirmInput) (
 		return Booking{}, err
 	}
 
+	tz, err := s.resolveTimezone(locationID)
+	if err != nil {
+		return Booking{}, err
+	}
+
 	tx, err := s.repo.BeginTx()
 	if err != nil {
 		return Booking{}, err
@@ -196,7 +274,7 @@ func (s *Service) Confirm(locationID string, adminID *uint64, in ConfirmInput) (
 		return Booking{}, err
 	}
 
-	for _, seg := range in.Segments {
+	for i, seg := range in.Segments {
 		conflicts, err := s.repo.FindConflicts(tx, seg.EmployeeID, seg.Start, seg.BlockedUntil)
 		if err != nil {
 			return Booking{}, err
@@ -204,6 +282,14 @@ func (s *Service) Confirm(locationID string, adminID *uint64, in ConfirmInput) (
 		if len(conflicts) > 0 {
 			return Booking{}, ErrSlotNoLongerAvailable
 		}
+		if err := verifySegmentAvailable(tx, seg, tz); err != nil {
+			return Booking{}, err
+		}
+		price, err := s.verifySegmentIntegrity(tx, locationID, seg)
+		if err != nil {
+			return Booking{}, err
+		}
+		in.Segments[i].Price = price // never trust the client-submitted price past this point
 	}
 
 	windowStart, windowEnd, total := computeWindow(in.Segments)
@@ -404,6 +490,11 @@ func (s *Service) Reschedule(bookingID string, in RescheduleInput) (Booking, err
 		return Booking{}, ErrAlreadyCompleted
 	}
 
+	tz, err := s.resolveTimezone(b.LocationID)
+	if err != nil {
+		return Booking{}, err
+	}
+
 	oldSegments, err := s.repo.SegmentsForBooking(tx, bookingID, true)
 	if err != nil {
 		return Booking{}, err
@@ -458,8 +549,19 @@ func (s *Service) Reschedule(bookingID string, in RescheduleInput) (Booking, err
 		if len(conflicts) > 0 {
 			return Booking{}, ErrSlotNoLongerAvailable // ROLLBACK (deferred) restores the original booking exactly
 		}
+		if err := verifySegmentAvailable(tx, seg, tz); err != nil {
+			return Booking{}, err // ROLLBACK (deferred) restores the original booking exactly
+		}
+		verifiedPrice, err := s.verifySegmentIntegrity(tx, b.LocationID, seg)
+		if err != nil {
+			return Booking{}, err // ROLLBACK (deferred) restores the original booking exactly
+		}
 
-		originalPrice, price := seg.Price, seg.Price
+		// never trust the client-submitted seg.Price — a newly-added service
+		// gets the service's current price (verifiedPrice); an unchanged
+		// service instead carries over its existing admin discount below,
+		// from the DB-sourced old segment, never from client input either.
+		originalPrice, price := verifiedPrice, verifiedPrice
 		if queue := oldByService[seg.ServiceID]; len(queue) > 0 {
 			old := queue[0]
 			oldByService[seg.ServiceID] = queue[1:]

@@ -10,12 +10,15 @@ export function formatDuration(minutes: number): string {
   return `${m} min`;
 }
 
-export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+// timeZone should always be the booking location's own IANA zone — appointment
+// times are meaningless in whoever's viewing device happens to be set to, and
+// silently fall back to it (via undefined) only when no location is in scope.
+export function formatTime(iso: string, timeZone?: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", timeZone });
 }
 
-export function formatTimeRange(startIso: string, endIso: string): string {
-  return `${formatTime(startIso)} – ${formatTime(endIso)}`;
+export function formatTimeRange(startIso: string, endIso: string, timeZone?: string): string {
+  return `${formatTime(startIso, timeZone)} – ${formatTime(endIso, timeZone)}`;
 }
 
 export function formatShortDate(iso: string): string {

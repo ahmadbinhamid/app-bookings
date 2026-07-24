@@ -7,19 +7,21 @@ interface BookingTimelineProps {
   segments: TimelineSegmentInput[];
   variant?: "mini" | "large";
   className?: string;
+  /** The booking location's IANA zone — appointment times render in it, not the viewer's own. */
+  timeZone?: string;
 }
 
 // Visualizes a booking's segments on a shared time axis, with idle gaps
 // rendered as dashed regions — the redesign's core "gap-aware scheduling"
 // visual, reused by the bookings table, the new-booking proposal step, and
 // the booking detail dialog.
-export function BookingTimeline({ timeline, segments, variant = "mini", className }: BookingTimelineProps) {
+export function BookingTimeline({ timeline, segments, variant = "mini", className, timeZone }: BookingTimelineProps) {
   const isLarge = variant === "large";
-  const ticks = isLarge ? buildTimelineAxisTicks(segments) : [];
+  const ticks = isLarge ? buildTimelineAxisTicks(segments, timeZone) : [];
 
   return (
     <div className={className}>
-      <div className={cn("relative overflow-hidden rounded", isLarge ? "h-14" : "h-3 bg-muted")}>
+      <div className={cn("relative overflow-hidden rounded", isLarge ? "h-10" : "h-3 bg-muted")}>
         {timeline.gaps.map((gap, i) => (
           <div
             key={i}
@@ -44,12 +46,17 @@ export function BookingTimeline({ timeline, segments, variant = "mini", classNam
         {timeline.segments.map((seg, i) => (
           <div
             key={seg.key ?? i}
-            title={`${seg.name} · ${formatTimeRange(seg.start, seg.end)}`}
+            title={`${seg.name} · ${formatTimeRange(seg.start, seg.end, timeZone)}`}
             className={cn(
               "absolute inset-y-0 rounded flex items-center overflow-hidden",
-              isLarge && "px-2.5"
+              isLarge && "px-2"
             )}
-            style={{ left: `${seg.left}%`, width: `${seg.width}%`, backgroundColor: seg.color.solid }}
+            style={{
+              left: `${seg.left}%`, width: `${seg.width}%`, backgroundColor: seg.color.solid,
+              // A hairline seam between back-to-back segments — without it,
+              // two adjacent services paint as one undifferentiated block.
+              boxShadow: isLarge && i < timeline.segments.length - 1 ? "inset -2px 0 0 0 hsl(var(--card))" : undefined,
+            }}
           >
             {isLarge && (
               <span className="text-body-3 font-medium text-white capitalize truncate">{seg.name}</span>

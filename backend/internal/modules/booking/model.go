@@ -23,6 +23,26 @@ var (
 	// failure — the actual double-booking guarantee (design doc,
 	// Concurrency section).
 	ErrSlotNoLongerAvailable = errors.New("one or more segments in this proposal are no longer available")
+	// ErrEmployeeNoLongerAvailable is a DIFFERENT confirm/reschedule-time
+	// re-validation failure than ErrSlotNoLongerAvailable: no other booking
+	// conflicts with this segment, but the employee's EMPLOYEE_SCHEDULE or
+	// EMPLOYEE_TIME_OFF changed between Propose and Confirm/Reschedule, so
+	// the segment no longer fits their working hours. Kept distinct so the
+	// UI can say "this employee's schedule changed" instead of "someone
+	// else booked this" — either way the client's fix is the same, re-solve.
+	ErrEmployeeNoLongerAvailable = errors.New("one or more segments' employees are no longer available at this time (schedule or time off changed)")
+	// ErrInvalidSegment is a THIRD distinct confirm/reschedule-time
+	// re-validation failure, for a ProposedSegment that could never have
+	// legitimately come from this location's own Propose response: its
+	// service belongs to a different location, or its employee isn't
+	// active, isn't assigned to that service (EMPLOYEE_SERVICE), or
+	// belongs to a different location. The design doc's "fully optimistic"
+	// model means Confirm/Reschedule receive a client-controlled JSON body
+	// with no server-side session tying it back to the original Propose
+	// call — this is the check that a submitted segment couldn't have been
+	// tampered with (or simply gone stale) into referencing the wrong
+	// employee/service/location.
+	ErrInvalidSegment        = errors.New("one or more segments reference an employee or service that isn't valid for this booking's location")
 	ErrAlreadyCancelled      = errors.New("this is already cancelled")
 	ErrAlreadyCompleted      = errors.New("this is already completed and can't be cancelled")
 	ErrLocationTimezoneUnset = errors.New("this location's timezone must be confirmed before booking can be solved")

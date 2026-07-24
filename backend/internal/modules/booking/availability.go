@@ -2,11 +2,21 @@ package booking
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"app-booking/internal/solver"
 )
+
+// queryer is satisfied by both *sql.DB and *sql.Tx — lets scheduleIntervals
+// and timeOffOverlaps run either outside a transaction (Propose, via
+// freeIntervalsFor) or inside one (Confirm/Reschedule's confirm-time
+// re-validation, via verifyEmployeeStillAvailable).
+type queryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
 
 // freeIntervalsFor computes one employee's free absolute-time intervals for
 // targetDate at the given location timezone: EMPLOYEE_SCHEDULE (converted
@@ -52,8 +62,8 @@ func freeIntervalsFor(db *sql.DB, employeeID string, targetDate time.Time, loc *
 	return solver.Subtract(free, occupied), nil
 }
 
-func scheduleIntervals(db *sql.DB, employeeID string, dayOfWeek, y int, m time.Month, d int, loc *time.Location) ([]solver.Interval, error) {
-	rows, err := db.Query(`
+func scheduleIntervals(q queryer, employeeID string, dayOfWeek, y int, m time.Month, d int, loc *time.Location) ([]solver.Interval, error) {
+	rows, err := q.Query(`
 		SELECT start_time, end_time FROM employee_schedules
 		WHERE employee_id = ? AND day_of_week = ?
 	`, employeeID, dayOfWeek)
@@ -135,4 +145,66 @@ func occupiedIntervals(db *sql.DB, employeeID string, dayStartUTC, dayEndUTC tim
 		out = append(out, solver.Interval{Start: s, End: e})
 	}
 	return out, segRows.Err()
+}
+
+// verifyEmployeeStillAvailable is the confirm/reschedule-time re-validation
+// against EMPLOYEE_SCHEDULE and EMPLOYEE_TIME_OFF — a real gap FindConflicts
+// alone leaves open: FindConflicts only catches a SECOND booking claiming
+// the same slot, not an admin editing THIS employee's own working hours or
+// adding time off for the same window between Propose and Confirm/
+// Reschedule. Called inside the caller's transaction, after the employee
+// row lock (LockEmployees) and after FindConflicts, before any insert.
+//
+// Deliberately does NOT re-check existing booking_segments — that's already
+// FindConflicts' job, run separately by the caller. This only re-verifies
+// the [start, blockedUntil) segment still falls inside the employee's
+// working hours and isn't covered by time off, using the same DST-safe
+// wall-clock-to-instant conversion freeIntervalsFor uses at proposal time
+// (combineDateAndTimeOfDay), just scoped to one segment rather than a whole
+// day's free intervals.
+func verifyEmployeeStillAvailable(tx *sql.Tx, employeeID string, start, blockedUntil time.Time, loc *time.Location) (bool, error) {
+	local := start.In(loc)
+	y, m, d := local.Date()
+	dayOfWeek := int(local.Weekday())
+
+	scheduleIvs, err := scheduleIntervals(tx, employeeID, dayOfWeek, y, m, d, loc)
+	if err != nil {
+		return false, fmt.Errorf("schedule intervals: %w", err)
+	}
+	fitsSchedule := false
+	for _, iv := range scheduleIvs {
+		if !start.Before(iv.Start) && !blockedUntil.After(iv.End) {
+			fitsSchedule = true
+			break
+		}
+	}
+	if !fitsSchedule {
+		return false, nil
+	}
+
+	onTimeOff, err := timeOffOverlaps(tx, employeeID, start, blockedUntil)
+	if err != nil {
+		return false, fmt.Errorf("time off overlap: %w", err)
+	}
+	return !onTimeOff, nil
+}
+
+// timeOffOverlaps is a boolean existence check over the same window
+// occupiedIntervals's time-off query uses, kept separate since callers want
+// different shapes: occupiedIntervals needs actual ranges to subtract,
+// verifyEmployeeStillAvailable just needs yes/no.
+func timeOffOverlaps(q queryer, employeeID string, start, end time.Time) (bool, error) {
+	var discard string
+	err := q.QueryRow(`
+		SELECT id FROM employee_time_off
+		WHERE employee_id = ? AND start_datetime < ? AND end_datetime > ?
+		LIMIT 1
+	`, employeeID, end, start).Scan(&discard)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }

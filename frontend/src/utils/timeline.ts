@@ -33,7 +33,7 @@ export interface BuiltTimeline {
 // consecutive (time-sorted) segments — the visual heart of the "gap-aware
 // scheduling" pitch. Pure percentage geometry so it works at any container
 // width; callers render it with absolutely-positioned blocks.
-export function buildTimeline(items: TimelineSegmentInput[]): BuiltTimeline | null {
+export function buildTimeline(items: TimelineSegmentInput[], timeZone?: string): BuiltTimeline | null {
   if (items.length === 0) return null;
 
   const sorted = [...items].sort(
@@ -71,8 +71,8 @@ export function buildTimeline(items: TimelineSegmentInput[]): BuiltTimeline | nu
     segments,
     gaps,
     totalGapMinutes: gaps.reduce((sum, g) => sum + g.minutes, 0),
-    startLabel: formatTime(sorted[0].start),
-    endLabel: formatTime(sorted[sorted.length - 1].end),
+    startLabel: formatTime(sorted[0].start, timeZone),
+    endLabel: formatTime(sorted[sorted.length - 1].end, timeZone),
   };
 }
 
@@ -84,7 +84,7 @@ export interface TimelineAxisTick {
 
 // 30-minute tick marks under the "large" timeline variant, spanning the same
 // window buildTimeline used.
-export function buildTimelineAxisTicks(items: TimelineSegmentInput[]): TimelineAxisTick[] {
+export function buildTimelineAxisTicks(items: TimelineSegmentInput[], timeZone?: string): TimelineAxisTick[] {
   if (items.length === 0) return [];
   const windowStart = Math.min(...items.map((s) => new Date(s.start).getTime()));
   const windowEnd = Math.max(...items.map((s) => new Date(s.end).getTime()));
@@ -97,7 +97,7 @@ export function buildTimelineAxisTicks(items: TimelineSegmentInput[]): TimelineA
     ticks.push({
       key: String(t),
       left: ((t - windowStart) / span) * 100,
-      label: formatTime(new Date(t).toISOString()),
+      label: formatTime(new Date(t).toISOString(), timeZone),
     });
   }
   return ticks;
