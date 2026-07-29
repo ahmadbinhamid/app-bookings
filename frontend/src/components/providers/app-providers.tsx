@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { QueryClient, QueryClientProvider, QueryCache, MutationCache } from "@tanstack/react-query";
 import { TooltipProvider } from "@flowposltd/ui";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { LocationProvider } from "@/contexts/location-context";
 
 function errorMessage(error: unknown): string {
@@ -13,7 +13,15 @@ const queryClient = new QueryClient({
     onError: (error) => toast.error(errorMessage(error)),
   }),
   mutationCache: new MutationCache({
-    onError: (error) => toast.error(errorMessage(error)),
+    // A catch-all safety net so a mutation that forgets to handle its own
+    // error still surfaces *something* — but a mutation whose own onError
+    // already shows the error (inline in a dialog, or its own explicit
+    // toast) sets meta: { skipErrorToast: true } to opt out, so the error
+    // isn't shown twice.
+    onError: (error, _variables, _context, mutation) => {
+      if (mutation.meta?.skipErrorToast) return;
+      toast.error(errorMessage(error));
+    },
   }),
   defaultOptions: {
     queries: {

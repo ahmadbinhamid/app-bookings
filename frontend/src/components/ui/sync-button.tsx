@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Button } from "@flowposltd/ui";
 import { RotateCw } from "lucide-react";
 import { triggerSync } from "@/lib/api";

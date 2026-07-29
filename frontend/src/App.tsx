@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Toaster } from "sonner";
+import { Toaster } from "@flowposltd/ui";
 import { AppProviders } from "@/components/providers/app-providers";
 import { AppShell } from "@/components/shell/app-shell";
 import { PageFallback } from "@/components/ui/page-fallback";
@@ -66,7 +66,7 @@ export default function App() {
           </Route>
         </Routes>
       </AppProviders>
-      <Toaster richColors position="bottom-right" />
+      <Toaster />
     </BrowserRouter>
   );
 }

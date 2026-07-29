@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
   Button, Input,
@@ -104,6 +104,9 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   const employeeByID = new Map<string, Employee>(employees.map((e) => [e.id, e]));
 
   const proposeMut = useMutation({
+    // skipErrorToast: shown inline (proposeError) below instead — see
+    // app-providers.tsx's MutationCache for why this flag exists.
+    meta: { skipErrorToast: true },
     mutationFn: () =>
       proposeBooking(locationId, {
         services: selectedServiceIds.map((id) => ({ service_id: id })),
@@ -129,6 +132,9 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   });
 
   const confirmMut = useMutation({
+    // skipErrorToast: this mutation already calls toast.error itself below —
+    // see app-providers.tsx's MutationCache for why this flag exists.
+    meta: { skipErrorToast: true },
     mutationFn: () =>
       confirmBooking(locationId, {
         customer_name: customerName,
@@ -153,6 +159,9 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   });
 
   const rescheduleMut = useMutation({
+    // skipErrorToast: this mutation already calls toast.error itself below —
+    // see app-providers.tsx's MutationCache for why this flag exists.
+    meta: { skipErrorToast: true },
     mutationFn: () => rescheduleBooking(locationId, bookingId!, { segments: proposal!.segments }),
     onSuccess: () => {
       toast.success("Booking rescheduled");
