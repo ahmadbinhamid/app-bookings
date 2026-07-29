@@ -85,6 +85,12 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   });
 
   const serviceByID = new Map<string, Service>(services.map((s) => [s.id, s]));
+  // Deleting a service soft-deletes it (active=false, row and history kept —
+  // see the backend's services.Repository.Delete) — it must not be pickable
+  // for a NEW booking, even though serviceByID above still needs the full,
+  // unfiltered list so an existing reschedule's already-selected (and now
+  // possibly deleted) service still resolves its name/price correctly.
+  const selectableServices = services.filter((s) => s.active);
   const employeeByID = new Map<string, Employee>(employees.map((e) => [e.id, e]));
 
   const proposeMut = useMutation({
@@ -215,10 +221,10 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
                   </span>
                 </div>
                 <div className="flex flex-col gap-2.5 max-h-64 overflow-y-auto">
-                  {services.length === 0 && (
+                  {selectableServices.length === 0 && (
                     <p className="text-body-2 text-content-secondary p-2">No services yet at this location.</p>
                   )}
-                  {services.map((svc) => {
+                  {selectableServices.map((svc) => {
                     const on = selectedServiceIds.includes(svc.id);
                     const v = serviceVisual(svc.name);
                     return (

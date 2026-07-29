@@ -21,10 +21,16 @@ func NewServiceHandler(svc *services.MyService) *ServiceHandler {
 	return &ServiceHandler{svc: svc}
 }
 
+// List defaults to every service (active or deleted/deactivated) — the
+// Services management page passes ?active=true to hide deleted ones, while
+// booking flows that need to resolve a possibly-deleted service (new-booking
+// picker aside, which filters active itself client-side; historical booking
+// display) rely on this default so old bookings still show the right name.
 func (h *ServiceHandler) List(c *gin.Context) {
 	p := parsePagination(c)
 	search := strings.TrimSpace(c.Query("search"))
-	items, total, err := h.svc.List(locationFrom(c).ID, p, search)
+	activeOnly := c.Query("active") == "true"
+	items, total, err := h.svc.List(locationFrom(c).ID, p, search, activeOnly)
 	if err != nil {
 		respondErr(c, err)
 		return
@@ -66,9 +72,9 @@ func (h *ServiceHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, s)
 }
 
-// Delete removes the service — blocked with a friendly error (services.ErrHasBookings)
-// if it's actually been booked, rather than either losing that booking
-// history or crashing on the raw FK violation.
+// Delete soft-deletes the service (see services.Repository.Delete's doc
+// comment for why) — always a plain 204, there's no failure mode left to
+// report.
 func (h *ServiceHandler) Delete(c *gin.Context) {
 	if err := h.svc.Delete(serviceFrom(c).ID); err != nil {
 		respondErr(c, err)

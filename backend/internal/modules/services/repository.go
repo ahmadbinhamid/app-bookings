@@ -7,15 +7,10 @@ import (
 
 	"app-booking/internal/config/pagination"
 
-	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 )
 
 var ErrNotFound = errors.New("service not found")
-
-// ErrHasBookings blocks deleting a service that's actually been booked —
-// see Delete's doc comment.
-var ErrHasBookings = errors.New("this service is currently booked and can't be deleted")
 
 type Repository struct {
 	db *sql.DB
@@ -25,10 +20,20 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) List(locationID string, p pagination.Params, search string) ([]Service, int, error) {
+// List optionally excludes deleted (deactivated) services via activeOnly —
+// the Services management page passes true so a deleted service actually
+// disappears from it; the booking flows (new-booking service picker,
+// historical booking display) pass false since a past booking still needs
+// to resolve a deleted service's name, and a service picker for NEW bookings
+// filters active itself where that matters — see Delete's doc comment for
+// why deletion never removes the row at all.
+func (r *Repository) List(locationID string, p pagination.Params, search string, activeOnly bool) ([]Service, int, error) {
 	where := " WHERE location_id = ?"
 	args := []any{locationID}
 
+	if activeOnly {
+		where += " AND active = TRUE"
+	}
 	if search != "" {
 		where += " AND name LIKE ?"
 		args = append(args, "%"+search+"%")
@@ -129,33 +134,20 @@ func (r *Repository) Update(id string, in Input) (Service, error) {
 	return r.Get(id)
 }
 
-// isForeignKeyViolation reports whether err is MySQL error 1451 ("cannot
-// delete or update a parent row: a foreign key constraint fails") — the
-// signal that some other table still references the row being deleted.
-func isForeignKeyViolation(err error) bool {
-	var mysqlErr *mysql.MySQLError
-	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1451
-}
-
-// Delete removes a service, first clearing its employee_services rows (the
-// "who can perform this" assignments — plain metadata, safe to drop). If a
-// booking was ever actually made against this service, booking_segments'
-// composite FK into employee_services blocks that cleanup, and this returns
-// ErrHasBookings instead of deleting anything, rather than losing booking
-// history or leaving a dangling reference.
+// Delete soft-deletes a service: active flips to FALSE, nothing is ever
+// removed. A hard delete was tried first (clearing employee_services, then
+// booking_segments, then the row itself) but that meant any service with
+// completed or cancelled booking history got its segments wiped out too —
+// booking_segments' composite FK into employee_services has no CASCADE, so
+// there was no way to hard-delete a used service without also destroying the
+// booking history that referenced it, which then showed up as blank
+// service/employee/time fields on old bookings. Deactivating avoids that
+// entirely: List(activeOnly=true) hides it from the Services page as
+// requested, while every other list call (booking history display, etc.)
+// still resolves it correctly since the row is untouched.
 func (r *Repository) Delete(id string) error {
-	if _, err := r.db.Exec(`DELETE FROM employee_services WHERE service_id = ?`, id); err != nil {
-		if isForeignKeyViolation(err) {
-			return ErrHasBookings
-		}
-		return err
-	}
-
-	res, err := r.db.Exec(`DELETE FROM services WHERE id = ?`, id)
+	res, err := r.db.Exec(`UPDATE services SET active = FALSE, updated_at = ? WHERE id = ?`, time.Now().UTC(), id)
 	if err != nil {
-		if isForeignKeyViolation(err) {
-			return ErrHasBookings
-		}
 		return err
 	}
 	affected, err := res.RowsAffected()

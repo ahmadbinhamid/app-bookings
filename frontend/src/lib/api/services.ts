@@ -1,14 +1,20 @@
 import { apiClient } from "./client";
 import { type Service, type ServiceInput, type Employee, type Page } from "@/types";
 
+// activeOnly excludes deleted (deactivated) services — pass true for the
+// Services management page; leave false (default) for anything that needs
+// to resolve a possibly-deleted service, like historical booking display,
+// since deleting one never removes the row (see the backend's
+// services.Repository.Delete doc comment).
 export async function listServices(
   locationId: string,
   page: number,
   limit: number,
-  search?: string
+  search?: string,
+  activeOnly?: boolean
 ): Promise<Page<Service>> {
   const res = await apiClient.get<Page<Service>>(`/locations/${locationId}/services`, {
-    params: { page, limit, search: search || undefined },
+    params: { page, limit, search: search || undefined, active: activeOnly || undefined },
   });
   return res.data;
 }
@@ -28,9 +34,9 @@ export async function updateService(locationId: string, serviceId: string, input
   return res.data;
 }
 
-// Rejected with a 409 (code SERVICE_HAS_BOOKINGS) if the service has ever
-// actually been booked — the backend won't delete it out from under real
-// booking history.
+// Soft-deletes the service (see the backend's services.Repository.Delete
+// doc comment) — the row and its booking history are kept, it just stops
+// showing up wherever activeOnly is requested.
 export async function deleteService(locationId: string, serviceId: string): Promise<void> {
   await apiClient.delete(`/locations/${locationId}/services/${serviceId}`);
 }

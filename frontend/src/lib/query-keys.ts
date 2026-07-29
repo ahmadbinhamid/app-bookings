@@ -9,8 +9,11 @@ export const queryKeys = {
   allEmployees: () => ["employees", "all"] as const,
   unassignedEmployees: () => ["employees", "unassigned"] as const,
 
-  services: (locationId: string, page: number, limit: number, search?: string) =>
-    ["services", locationId, page, limit, search] as const,
+  // activeOnly is part of the key — an active-only page (Services
+  // management view) and an unfiltered one (booking flows resolving a
+  // possibly-deleted service) must never share a cache entry.
+  services: (locationId: string, page: number, limit: number, search?: string, activeOnly?: boolean) =>
+    ["services", locationId, page, limit, search, activeOnly] as const,
   service: (locationId: string, serviceId: string) => ["services", locationId, serviceId] as const,
   serviceEmployees: (locationId: string, serviceId: string) =>
     ["services", locationId, serviceId, "employees"] as const,

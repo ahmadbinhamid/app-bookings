@@ -28,8 +28,8 @@ export default function ServicesPage() {
   const [deleting, setDeleting] = useState<Service | undefined>();
 
   const { data, isLoading } = useQuery({
-    queryKey: selectedLocationId ? queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined) : ["services", "none"],
-    queryFn: () => listServices(selectedLocationId!, page, DEFAULT_LIMIT, search || undefined),
+    queryKey: selectedLocationId ? queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined, true) : ["services", "none"],
+    queryFn: () => listServices(selectedLocationId!, page, DEFAULT_LIMIT, search || undefined, true),
     enabled: Boolean(selectedLocationId),
   });
 
@@ -37,24 +37,19 @@ export default function ServicesPage() {
     mutationFn: (id: string) => deleteService(selectedLocationId!, id),
     onSuccess: (_data, deletedId) => {
       toast.success("Service deleted");
-      // Synchronously drop it from the exact list page currently on screen,
-      // in this same callback, BEFORE the broad invalidate below runs —
-      // otherwise the ServiceCard for it is still mounted when that
-      // invalidate fires (React Query keeps rendering stale data while a
-      // refetch is in flight) and its own "assigned employees" sub-query
-      // refetches against an id that no longer exists, surfacing a 404.
-      // This makes the card unmount on the very next render instead, before
-      // that refetch ever has a chance to fire.
+      // Delete is a soft-delete on the backend (the row and its booking
+      // history stick around, just active=false) — drop it from this
+      // active-only list's cache immediately, in this same callback, so it
+      // disappears on the very next render instead of waiting on the
+      // invalidate below to round-trip.
       if (selectedLocationId) {
         qc.setQueryData<Page<Service>>(
-          queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined),
+          queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined, true),
           (old) =>
             old
               ? { ...old, data: old.data.filter((s) => s.id !== deletedId), meta: { ...old.meta, total: Math.max(0, old.meta.total - 1) } }
               : old
         );
-        qc.removeQueries({ queryKey: queryKeys.service(selectedLocationId, deletedId) });
-        qc.removeQueries({ queryKey: queryKeys.serviceEmployees(selectedLocationId, deletedId) });
       }
       qc.invalidateQueries({ queryKey: ["services"] });
       setDeleting(undefined);
@@ -236,9 +231,6 @@ export default function ServicesPage() {
         onClose={() => setFormOpen(false)}
         locationId={selectedLocationId}
         service={editing}
-        page={page}
-        limit={DEFAULT_LIMIT}
-        search={search}
       />
       <ServiceAssignmentsDialog
         open={Boolean(assignmentsFor)}

@@ -13,8 +13,8 @@ func NewService(repo *Repository) *MyService {
 	return &MyService{repo: repo}
 }
 
-func (s *MyService) List(locationID string, p pagination.Params, search string) ([]Service, int, error) {
-	return s.repo.List(locationID, p, search)
+func (s *MyService) List(locationID string, p pagination.Params, search string, activeOnly bool) ([]Service, int, error) {
+	return s.repo.List(locationID, p, search, activeOnly)
 }
 
 func (s *MyService) Get(id string) (Service, error) {

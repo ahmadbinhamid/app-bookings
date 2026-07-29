@@ -9,7 +9,6 @@ import { DialogBody } from "@/components/ui/dialog-body";
 import { FormField } from "@/components/ui/form-field";
 import { type Service, type ServiceInput } from "@/types";
 import { createService, updateService } from "@/lib/api";
-import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/utils";
 
 interface ServiceFormProps {
@@ -17,9 +16,6 @@ interface ServiceFormProps {
   onClose: () => void;
   locationId: string;
   service?: Service;
-  page: number;
-  limit: number;
-  search: string;
 }
 
 const EMPTY: ServiceInput = {
@@ -32,7 +28,7 @@ const EMPTY: ServiceInput = {
 
 const DURATION_PRESETS = [15, 30, 45, 60];
 
-export function ServiceForm({ open, onClose, locationId, service, page, limit, search }: ServiceFormProps) {
+export function ServiceForm({ open, onClose, locationId, service }: ServiceFormProps) {
   const qc = useQueryClient();
   const isEdit = Boolean(service);
 
@@ -57,8 +53,11 @@ export function ServiceForm({ open, onClose, locationId, service, page, limit, s
     }
   }, [open, service]);
 
-  const invalidate = () =>
-    qc.invalidateQueries({ queryKey: queryKeys.services(locationId, page, limit, search || undefined) });
+  // Broad match on purpose: queryKeys.services now carries an activeOnly
+  // flag too (the Services page reads activeOnly=true, booking flows read
+  // the unfiltered default) — invalidating one exact variant would leave
+  // the other showing stale data after a create/update.
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["services", locationId] });
 
   const createMut = useMutation({
     mutationFn: (input: ServiceInput) => createService(locationId, input),
