@@ -66,6 +66,9 @@ func (h *ServiceHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, s)
 }
 
+// Delete removes the service — blocked with a friendly error (services.ErrHasBookings)
+// if it's actually been booked, rather than either losing that booking
+// history or crashing on the raw FK violation.
 func (h *ServiceHandler) Delete(c *gin.Context) {
 	if err := h.svc.Delete(serviceFrom(c).ID); err != nil {
 		respondErr(c, err)

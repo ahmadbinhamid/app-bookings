@@ -2,7 +2,11 @@ import { Outlet } from "react-router-dom";
 import { SidebarProvider, SidebarInset, SidebarTrigger } from "@flowposltd/ui";
 import { AppNav } from "./nav";
 import { LocationSwitcher } from "@/components/locations/location-switcher";
-import { TimezoneBanner } from "@/components/locations/timezone-banner";
+// TEMPORARY: TimezoneBanner disabled — every location defaults to (and
+// stays) UTC until per-location timezone selection is built, so there's
+// nothing for an admin to act on here yet. Re-enable this import + render
+// once that feature lands.
+// import { TimezoneBanner } from "@/components/locations/timezone-banner";
 
 export function AppShell() {
   return (
@@ -13,9 +17,9 @@ export function AppShell() {
           <SidebarTrigger />
           <LocationSwitcher />
         </div>
-        <div className="px-4 sm:px-6 pt-4">
+        {/* <div className="px-4 sm:px-6 pt-4">
           <TimezoneBanner />
-        </div>
+        </div> */}
         <Outlet />
       </SidebarInset>
     </SidebarProvider>

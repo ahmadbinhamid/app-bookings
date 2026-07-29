@@ -28,6 +28,9 @@ export async function updateService(locationId: string, serviceId: string, input
   return res.data;
 }
 
+// Rejected with a 409 (code SERVICE_HAS_BOOKINGS) if the service has ever
+// actually been booked — the backend won't delete it out from under real
+// booking history.
 export async function deleteService(locationId: string, serviceId: string): Promise<void> {
   await apiClient.delete(`/locations/${locationId}/services/${serviceId}`);
 }

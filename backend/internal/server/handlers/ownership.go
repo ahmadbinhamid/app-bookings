@@ -56,10 +56,12 @@ func locationFrom(c *gin.Context) location.Location {
 // RequireEmployeeInLocation checks that :employeeId exists and belongs to
 // the location already resolved by RequireLocationOwnership — mount after
 // it on any route group nested under /locations/:locationId/employees/:employeeId.
+// An employee not yet assigned to any location (LocationID == nil) never
+// belongs here either.
 func RequireEmployeeInLocation(employees *employee.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		emp, err := employees.GetByID(c.Param("employeeId"))
-		if errors.Is(err, employee.ErrNotFound) || (err == nil && emp.LocationID != locationFrom(c).ID) {
+		if errors.Is(err, employee.ErrNotFound) || (err == nil && (emp.LocationID == nil || *emp.LocationID != locationFrom(c).ID)) {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "employee not found"})
 			return
 		}

@@ -49,7 +49,7 @@ func (h *AssignmentHandler) Assign(c *gin.Context) {
 	}
 
 	emp, err := h.employees.GetByID(in.EmployeeID)
-	if errors.Is(err, employee.ErrNotFound) || (err == nil && emp.LocationID != locationFrom(c).ID) {
+	if errors.Is(err, employee.ErrNotFound) || (err == nil && (emp.LocationID == nil || *emp.LocationID != locationFrom(c).ID)) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "employee not found at this location"})
 		return
 	}
@@ -68,7 +68,7 @@ func (h *AssignmentHandler) Assign(c *gin.Context) {
 
 func (h *AssignmentHandler) Unassign(c *gin.Context) {
 	emp, err := h.employees.GetByID(c.Param("employeeId"))
-	if errors.Is(err, employee.ErrNotFound) || (err == nil && emp.LocationID != locationFrom(c).ID) {
+	if errors.Is(err, employee.ErrNotFound) || (err == nil && (emp.LocationID == nil || *emp.LocationID != locationFrom(c).ID)) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "employee not found at this location"})
 		return
 	}

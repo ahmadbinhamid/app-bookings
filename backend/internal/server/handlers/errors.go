@@ -61,7 +61,9 @@ func respondErr(c *gin.Context, err error) {
 		errors.Is(err, booking.ErrSlotNoLongerAvailable),
 		errors.Is(err, booking.ErrEmployeeNoLongerAvailable),
 		errors.Is(err, booking.ErrAlreadyCancelled),
-		errors.Is(err, booking.ErrAlreadyCompleted):
+		errors.Is(err, booking.ErrAlreadyCompleted),
+		errors.Is(err, employee.ErrHasFutureBookings),
+		errors.Is(err, services.ErrHasBookings):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": errCode(err)})
 	case errors.Is(err, flowpos.ErrUpstreamRejected):
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
@@ -87,6 +89,10 @@ func errCode(err error) string {
 		return "ALREADY_COMPLETED"
 	case errors.Is(err, schedules.ErrOverlap):
 		return "SCHEDULE_OVERLAP"
+	case errors.Is(err, employee.ErrHasFutureBookings):
+		return "HAS_FUTURE_BOOKINGS"
+	case errors.Is(err, services.ErrHasBookings):
+		return "SERVICE_HAS_BOOKINGS"
 	default:
 		return ""
 	}

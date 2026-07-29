@@ -6,6 +6,8 @@ export const queryKeys = {
   locations: () => ["locations"] as const,
 
   employees: (locationId: string) => ["employees", locationId] as const,
+  allEmployees: () => ["employees", "all"] as const,
+  unassignedEmployees: () => ["employees", "unassigned"] as const,
 
   services: (locationId: string, page: number, limit: number, search?: string) =>
     ["services", locationId, page, limit, search] as const,

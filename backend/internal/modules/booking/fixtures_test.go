@@ -35,8 +35,8 @@ func seedEmployeeAt(t *testing.T, conn *sql.DB, locationID, name string) string 
 	t.Helper()
 	id := newUUID()
 	if _, err := conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, TRUE, NOW(), NOW(), NOW())
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, ?, ?, ?, TRUE, NOW(), NOW(), NOW())
 	`, id, locationID, newUUID(), name); err != nil {
 		t.Fatalf("seed employee: %v", err)
 	}

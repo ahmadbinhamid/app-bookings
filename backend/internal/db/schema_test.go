@@ -55,8 +55,8 @@ func seedEmployee(t *testing.T, conn *sql.DB, locationID string) string {
 	t.Helper()
 	id := newUUID()
 	_, err := conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Test Employee', TRUE, NOW(), NOW(), NOW())
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, ?, ?, 'Test Employee', TRUE, NOW(), NOW(), NOW())
 	`, id, locationID, newUUID())
 	if err != nil {
 		t.Fatalf("seed employee: %v", err)
@@ -101,50 +101,52 @@ func seedBooking(t *testing.T, conn *sql.DB, locationID string) string {
 	return id
 }
 
-// --- EMPLOYEE: composite unique (location_id, flowpos_employee_id) ---
+// --- EMPLOYEE: composite unique (tenant_id, flowpos_employee_id) ---
+//
+// Employees are keyed by tenant, not location: FlowPOS has no employee-
+// location relationship at all (just two flat, unrelated lists per tenant),
+// so location_id is a separate, nullable, admin-assigned column — see
+// internal/modules/employee's doc comments.
 
-func TestEmployee_DuplicateFlowposIDAtSameLocation_Rejected(t *testing.T) {
+func TestEmployee_DuplicateFlowposIDForSameTenant_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
-	loc := seedLocation(t, conn)
 	flowposID := newUUID()
 
 	_, err := conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Employee A', TRUE, NOW(), NOW(), NOW())
-	`, newUUID(), loc, flowposID)
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, NULL, ?, 'Employee A', TRUE, NOW(), NOW(), NOW())
+	`, newUUID(), flowposID)
 	if err != nil {
 		t.Fatalf("first insert should succeed: %v", err)
 	}
 
 	_, err = conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Employee A Duplicate', TRUE, NOW(), NOW(), NOW())
-	`, newUUID(), loc, flowposID)
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, NULL, ?, 'Employee A Duplicate', TRUE, NOW(), NOW(), NOW())
+	`, newUUID(), flowposID)
 	if err == nil {
-		t.Fatal("expected duplicate (location_id, flowpos_employee_id) to be rejected, got no error")
+		t.Fatal("expected duplicate (tenant_id, flowpos_employee_id) to be rejected, got no error")
 	}
 }
 
-func TestEmployee_SameFlowposIDAtDifferentLocations_Allowed(t *testing.T) {
+func TestEmployee_SameFlowposIDDifferentTenants_Allowed(t *testing.T) {
 	conn := connectOrSkip(t)
-	locA := seedLocation(t, conn)
-	locB := seedLocation(t, conn)
 	flowposID := newUUID()
 
 	_, err := conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Employee A', TRUE, NOW(), NOW(), NOW())
-	`, newUUID(), locA, flowposID)
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, NULL, ?, 'Employee A', TRUE, NOW(), NOW(), NOW())
+	`, newUUID(), flowposID)
 	if err != nil {
-		t.Fatalf("insert at location A should succeed: %v", err)
+		t.Fatalf("insert for tenant 1 should succeed: %v", err)
 	}
 
 	_, err = conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Employee A at another store', TRUE, NOW(), NOW(), NOW())
-	`, newUUID(), locB, flowposID)
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 2, NULL, ?, 'Employee A at another tenant', TRUE, NOW(), NOW(), NOW())
+	`, newUUID(), flowposID)
 	if err != nil {
-		t.Fatalf("same flowpos_employee_id at a different location should be allowed: %v", err)
+		t.Fatalf("same flowpos_employee_id for a different tenant should be allowed: %v", err)
 	}
 }
 
@@ -376,8 +378,8 @@ func TestBookingSegmentStatus_UnknownValue_Rejected(t *testing.T) {
 func TestEmployee_UnknownLocation_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	_, err := conn.Exec(`
-		INSERT INTO employees (id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
-		VALUES (?, ?, ?, 'Ghost', TRUE, NOW(), NOW(), NOW())
+		INSERT INTO employees (id, tenant_id, location_id, flowpos_employee_id, name, active, synced_at, created_at, updated_at)
+		VALUES (?, 1, ?, ?, 'Ghost', TRUE, NOW(), NOW(), NOW())
 	`, newUUID(), newUUID(), newUUID())
 	if err == nil {
 		t.Fatal("expected a dangling location_id to be rejected by fk_employees_location, got no error")

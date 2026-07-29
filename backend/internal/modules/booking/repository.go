@@ -135,6 +135,22 @@ func (r *Repository) FindConflicts(tx *sql.Tx, employeeID string, start, blocked
 	return scanSegments(rows)
 }
 
+// HasFutureBookingsForEmployee reports whether employeeID has any booked
+// (non-cancelled) segment starting after `after` — the guard behind
+// employee.Service.AssignLocation's "block reassignment while future
+// bookings exist" rule. Reuses idx_employee_overlap (employee_id, status,
+// start_time, blocked_until); no new index needed.
+func (r *Repository) HasFutureBookingsForEmployee(employeeID string, after time.Time) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(`
+		SELECT EXISTS(
+			SELECT 1 FROM booking_segments
+			WHERE employee_id = ? AND status = 'booked' AND start_time > ?
+		)
+	`, employeeID, after).Scan(&exists)
+	return exists, err
+}
+
 func scanSegments(rows *sql.Rows) ([]Segment, error) {
 	var out []Segment
 	for rows.Next() {

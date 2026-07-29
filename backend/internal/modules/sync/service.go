@@ -41,59 +41,50 @@ type Summary struct {
 	LocationsSynced      int    `json:"locations_synced"`
 	EmployeesSynced      int    `json:"employees_synced"`
 	EmployeesDeactivated int64  `json:"employees_deactivated"`
-	// LocationErrors holds one entry per location whose employee sync
-	// failed — the whole tenant sync still completes for the other
-	// locations rather than aborting outright (design doc's Phase 2 tests
-	// call for "skip and log," not "crash").
-	LocationErrors []string `json:"location_errors,omitempty"`
 }
 
-// syncedLocation pairs a local location row with the FlowPOS-side id to use
-// when fetching its employees ("" in fallback mode, meaning "no location
-// filter — fetch every employee").
-type syncedLocation struct {
-	local             location.Location
-	flowposLocationID string
-}
-
-// SyncTenant fetches the tenant's location list from FlowPOS, upserts each
-// into `locations`, then syncs employees per location — idempotent upsert
-// by (location_id, flowpos_employee_id), and deactivates (never deletes)
-// any employee no longer returned. Resolved per the design discussion:
-// multiple locations are the norm; a single-store tenant is just the
-// one-item case, no special-casing. Falls back to exactly one location per
-// tenant only if FlowPOS's /locations endpoint doesn't exist at all
-// (ErrEndpointNotFound) — any other error is a real failure and is returned
-// as-is, never silently treated as "must be single-location mode."
+// SyncTenant fetches the tenant's location list from FlowPOS and upserts each
+// into `locations`, then separately syncs the tenant's employees exactly
+// once. Locations and employees are two independent, unrelated FlowPOS lists
+// — FlowPOS has no employee-location relationship at all (confirmed against
+// flowpos-backend's EmployeeController, see
+// internal/flowpos/employees_unconfirmed.go's header) — so unlike locations,
+// employees are NOT synced once per location; doing so would upsert the same
+// tenant-wide list under every location and make "one employee, one
+// location" impossible to express. Which single location an employee
+// belongs to is an app-bookings-only concept an admin sets by hand — see
+// internal/modules/employee.Service.AssignLocation.
 func (s *Service) SyncTenant(ctx context.Context, tenantID uint64) (Summary, error) {
 	inst, err := s.installations.GetByTenantID(tenantID)
 	if err != nil {
 		return Summary{}, fmt.Errorf("sync tenant %d: %w", tenantID, err)
 	}
 
-	synced, mode, err := s.resolveLocations(ctx, tenantID, inst.APIKey)
+	locationsSynced, mode, err := s.syncLocations(ctx, tenantID, inst.APIKey)
 	if err != nil {
-		return Summary{}, fmt.Errorf("sync tenant %d: resolve locations: %w", tenantID, err)
+		return Summary{}, fmt.Errorf("sync tenant %d: sync locations: %w", tenantID, err)
 	}
 
-	summary := Summary{TenantID: tenantID, LocationMode: mode, LocationsSynced: len(synced)}
-
-	for _, sl := range synced {
-		employeesSynced, deactivated, err := s.syncEmployeesForLocation(ctx, sl, inst.APIKey)
-		if err != nil {
-			msg := fmt.Sprintf("location %s (flowpos id %q): %v", sl.local.ID, sl.flowposLocationID, err)
-			log.Printf("sync tenant %d: %s", tenantID, msg)
-			summary.LocationErrors = append(summary.LocationErrors, msg)
-			continue
-		}
-		summary.EmployeesSynced += employeesSynced
-		summary.EmployeesDeactivated += deactivated
+	employeesSynced, deactivated, err := s.syncEmployees(ctx, tenantID, inst.APIKey)
+	if err != nil {
+		return Summary{}, fmt.Errorf("sync tenant %d: sync employees: %w", tenantID, err)
 	}
 
-	return summary, nil
+	return Summary{
+		TenantID:             tenantID,
+		LocationMode:         mode,
+		LocationsSynced:      locationsSynced,
+		EmployeesSynced:      employeesSynced,
+		EmployeesDeactivated: deactivated,
+	}, nil
 }
 
-func (s *Service) resolveLocations(ctx context.Context, tenantID uint64, apiKey string) ([]syncedLocation, string, error) {
+// syncLocations upserts every location FlowPOS returns for the tenant,
+// falling back to exactly one location per tenant only if FlowPOS's
+// /locations endpoint doesn't exist at all (ErrEndpointNotFound) — any other
+// error is a real failure and is returned as-is, never silently treated as
+// "must be single-location mode."
+func (s *Service) syncLocations(ctx context.Context, tenantID uint64, apiKey string) (int, string, error) {
 	flowposLocations, err := s.flowposClient.ListLocations(ctx, apiKey)
 	switch {
 	case errors.Is(err, flowpos.ErrEndpointNotFound):
@@ -101,30 +92,31 @@ func (s *Service) resolveLocations(ctx context.Context, tenantID uint64, apiKey 
 		// to exactly one location per tenant (design resolution). Upsert is
 		// idempotent, so re-running this on every sync is safe and won't
 		// create duplicates.
-		def, err := s.locations.Upsert(tenantID, location.DefaultFlowposLocationID, "Default Location", location.DefaultTimezone)
-		if err != nil {
-			return nil, "", fmt.Errorf("ensure default location: %w", err)
+		if _, err := s.locations.Upsert(tenantID, location.DefaultFlowposLocationID, "Default Location", location.DefaultTimezone); err != nil {
+			return 0, "", fmt.Errorf("ensure default location: %w", err)
 		}
-		return []syncedLocation{{local: def, flowposLocationID: ""}}, "fallback_single_location", nil
+		return 1, "fallback_single_location", nil
 	case err != nil:
-		return nil, "", err
+		return 0, "", err
 	}
 
-	out := make([]syncedLocation, 0, len(flowposLocations))
 	for _, fl := range flowposLocations {
-		local, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, fl.Timezone)
-		if err != nil {
-			return nil, "", fmt.Errorf("upsert location %q: %w", fl.FlowposID, err)
+		// TEMPORARY: forcing UTC here instead of fl.Timezone, per-location
+		// timezone selection isn't built yet — every location defaults to UTC
+		// until that lands. Revert to fl.Timezone once it does.
+		if _, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, location.DefaultTimezone); err != nil {
+			return 0, "", fmt.Errorf("upsert location %q: %w", fl.FlowposID, err)
 		}
-		out = append(out, syncedLocation{local: local, flowposLocationID: fl.FlowposID})
 	}
-	return out, "flowpos", nil
+	return len(flowposLocations), "flowpos", nil
 }
 
-func (s *Service) syncEmployeesForLocation(ctx context.Context, sl syncedLocation, apiKey string) (synced int, deactivated int64, err error) {
-	// FlowPOS has no employee-to-location scoping (confirmed against
-	// flowpos-backend's EmployeeController), so every location gets the
-	// tenant's full employee list upserted under its own location_id.
+// syncEmployees fetches the tenant's complete employee list from FlowPOS
+// once — there is no location to scope by — and upserts it, idempotent by
+// (tenant_id, flowpos_employee_id), deactivating (never deleting) any
+// employee no longer returned. A malformed row (no id or name) is skipped
+// and logged rather than guessed at or allowed to fail the whole sync.
+func (s *Service) syncEmployees(ctx context.Context, tenantID uint64, apiKey string) (synced int, deactivated int64, err error) {
 	flowposEmployees, err := s.flowposClient.ListEmployees(ctx, apiKey)
 	if err != nil {
 		return 0, 0, err
@@ -132,23 +124,18 @@ func (s *Service) syncEmployeesForLocation(ctx context.Context, sl syncedLocatio
 
 	seenIDs := make([]string, 0, len(flowposEmployees))
 	for _, fe := range flowposEmployees {
-		// A row with no id or name isn't a real employee we can safely
-		// upsert (our composite unique key is (location_id,
-		// flowpos_employee_id) — an empty id would collide across every
-		// malformed row). Skip and log rather than guess or crash, per the
-		// design doc's Phase 2 test requirement.
 		if fe.FlowposID == "" || fe.Name == "" {
-			log.Printf("sync: skipping malformed employee record at location %s: %+v", sl.local.ID, fe)
+			log.Printf("sync: skipping malformed employee record for tenant %d: %+v", tenantID, fe)
 			continue
 		}
-		if _, err := s.employees.Upsert(sl.local.ID, fe.FlowposID, fe.Name, fe.Email, fe.Phone); err != nil {
+		if _, err := s.employees.Upsert(tenantID, fe.FlowposID, fe.Name, fe.Email, fe.Phone); err != nil {
 			return synced, 0, fmt.Errorf("upsert employee %q: %w", fe.FlowposID, err)
 		}
 		seenIDs = append(seenIDs, fe.FlowposID)
 		synced++
 	}
 
-	deactivated, err = s.employees.DeactivateMissing(sl.local.ID, seenIDs)
+	deactivated, err = s.employees.DeactivateMissing(tenantID, seenIDs)
 	if err != nil {
 		return synced, 0, fmt.Errorf("deactivate missing employees: %w", err)
 	}

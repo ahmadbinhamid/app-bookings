@@ -5,12 +5,13 @@ import { Badge, Button, Input } from "@flowposltd/ui";
 import { Search, X, ChevronLeft, ChevronRight, Plus, Scissors } from "lucide-react";
 import { listServices, deleteService } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { type Service } from "@/types";
+import { type Service, type Page } from "@/types";
 import { ServiceCard, ServiceCardSkeleton } from "@/components/services/service-card";
 import { ServiceForm } from "@/components/services/service-form";
 import { ServiceAssignmentsDialog } from "@/components/services/service-assignments-dialog";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageFallback } from "@/components/ui/page-fallback";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useLocationContext } from "@/contexts/location-context";
 
 const DEFAULT_LIMIT = 18; // 3 cols × 6 rows
@@ -24,6 +25,7 @@ export default function ServicesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Service | undefined>();
   const [assignmentsFor, setAssignmentsFor] = useState<Service | undefined>();
+  const [deleting, setDeleting] = useState<Service | undefined>();
 
   const { data, isLoading } = useQuery({
     queryKey: selectedLocationId ? queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined) : ["services", "none"],
@@ -33,9 +35,29 @@ export default function ServicesPage() {
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => deleteService(selectedLocationId!, id),
-    onSuccess: () => {
+    onSuccess: (_data, deletedId) => {
       toast.success("Service deleted");
+      // Synchronously drop it from the exact list page currently on screen,
+      // in this same callback, BEFORE the broad invalidate below runs —
+      // otherwise the ServiceCard for it is still mounted when that
+      // invalidate fires (React Query keeps rendering stale data while a
+      // refetch is in flight) and its own "assigned employees" sub-query
+      // refetches against an id that no longer exists, surfacing a 404.
+      // This makes the card unmount on the very next render instead, before
+      // that refetch ever has a chance to fire.
+      if (selectedLocationId) {
+        qc.setQueryData<Page<Service>>(
+          queryKeys.services(selectedLocationId, page, DEFAULT_LIMIT, search || undefined),
+          (old) =>
+            old
+              ? { ...old, data: old.data.filter((s) => s.id !== deletedId), meta: { ...old.meta, total: Math.max(0, old.meta.total - 1) } }
+              : old
+        );
+        qc.removeQueries({ queryKey: queryKeys.service(selectedLocationId, deletedId) });
+        qc.removeQueries({ queryKey: queryKeys.serviceEmployees(selectedLocationId, deletedId) });
+      }
       qc.invalidateQueries({ queryKey: ["services"] });
+      setDeleting(undefined);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -94,8 +116,7 @@ export default function ServicesPage() {
   }
 
   function handleDelete(svc: Service) {
-    if (!confirm(`Delete "${svc.name}"?`)) return;
-    deleteMut.mutate(svc.id);
+    setDeleting(svc);
   }
 
   return (
@@ -224,6 +245,15 @@ export default function ServicesPage() {
         onClose={() => setAssignmentsFor(undefined)}
         locationId={selectedLocationId}
         service={assignmentsFor}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onClose={() => setDeleting(undefined)}
+        onConfirm={() => deleteMut.mutate(deleting!.id)}
+        title={`Delete "${deleting?.name}"?`}
+        description="This can't be undone."
+        loading={deleteMut.isPending}
       />
     </div>
   );

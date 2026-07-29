@@ -7,10 +7,15 @@ import (
 
 	"app-booking/internal/config/pagination"
 
+	"github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 )
 
 var ErrNotFound = errors.New("service not found")
+
+// ErrHasBookings blocks deleting a service that's actually been booked —
+// see Delete's doc comment.
+var ErrHasBookings = errors.New("this service is currently booked and can't be deleted")
 
 type Repository struct {
 	db *sql.DB
@@ -124,9 +129,33 @@ func (r *Repository) Update(id string, in Input) (Service, error) {
 	return r.Get(id)
 }
 
+// isForeignKeyViolation reports whether err is MySQL error 1451 ("cannot
+// delete or update a parent row: a foreign key constraint fails") — the
+// signal that some other table still references the row being deleted.
+func isForeignKeyViolation(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1451
+}
+
+// Delete removes a service, first clearing its employee_services rows (the
+// "who can perform this" assignments — plain metadata, safe to drop). If a
+// booking was ever actually made against this service, booking_segments'
+// composite FK into employee_services blocks that cleanup, and this returns
+// ErrHasBookings instead of deleting anything, rather than losing booking
+// history or leaving a dangling reference.
 func (r *Repository) Delete(id string) error {
+	if _, err := r.db.Exec(`DELETE FROM employee_services WHERE service_id = ?`, id); err != nil {
+		if isForeignKeyViolation(err) {
+			return ErrHasBookings
+		}
+		return err
+	}
+
 	res, err := r.db.Exec(`DELETE FROM services WHERE id = ?`, id)
 	if err != nil {
+		if isForeignKeyViolation(err) {
+			return ErrHasBookings
+		}
 		return err
 	}
 	affected, err := res.RowsAffected()

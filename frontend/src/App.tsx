@@ -10,6 +10,7 @@ const HomePage = lazy(() => import("./pages/HomePage"));
 const ServicesPage = lazy(() => import("./pages/ServicesPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
 const BookingsPage = lazy(() => import("./pages/BookingsPage"));
+const LocationsPage = lazy(() => import("./pages/LocationsPage"));
 
 export default function App() {
   // Handshake + theme sync + auto-resize with the tenant-dashboard iframe
@@ -50,6 +51,14 @@ export default function App() {
               element={
                 <Suspense fallback={<PageFallback />}>
                   <EmployeesPage />
+                </Suspense>
+              }
+            />
+            <Route
+              path="locations"
+              element={
+                <Suspense fallback={<PageFallback />}>
+                  <LocationsPage />
                 </Suspense>
               }
             />

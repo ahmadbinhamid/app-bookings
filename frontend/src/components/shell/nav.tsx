@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { CalendarDays, Scissors, Users } from "lucide-react";
+import { CalendarDays, Scissors, Users, MapPin } from "lucide-react";
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar,
@@ -11,6 +11,7 @@ const NAV = [
   { to: "/", label: "Bookings", icon: CalendarDays },
   { to: "/services", label: "Services", icon: Scissors },
   { to: "/employees", label: "Employees", icon: Users },
+  { to: "/locations", label: "Locations", icon: MapPin },
 ];
 
 export function AppNav() {

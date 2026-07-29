@@ -61,15 +61,16 @@ export function ServiceCard({ service, locationId, onEdit, onDelete, onManageEmp
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              {/* Edit/Manage employees open a Dialog. Let the DropdownMenu
-                  close normally (no preventDefault — that would suppress
-                  Radix's own close behavior and leave it stuck open under
-                  the Dialog), but defer the Dialog-opening callback to a
+              {/* Edit/Manage employees/Delete all open a Dialog. Let the
+                  DropdownMenu close normally (no preventDefault — that would
+                  suppress Radix's own close behavior and leave it stuck open
+                  under the Dialog), but defer the Dialog-opening callback to a
                   macrotask so it runs after the DropdownMenu's close/unmount
                   has fully committed. Without this, the two Radix modals'
                   overlapping mount/unmount can leave document.body's
                   pointer-events lock stuck, silently breaking this card's
-                  hover-revealed trigger. */}
+                  hover-revealed trigger — and, worse, the whole page, since
+                  that lock lands on document.body, not just this card. */}
               <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>
                 <Pencil className="size-3.5" />
                 Edit
@@ -79,7 +80,7 @@ export function ServiceCard({ service, locationId, onEdit, onDelete, onManageEmp
                 Manage employees
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuDangerItem onClick={onDelete}>
+              <DropdownMenuDangerItem onSelect={() => setTimeout(onDelete, 0)}>
                 <Trash2 className="size-3.5" />
                 Delete
               </DropdownMenuDangerItem>

@@ -7,6 +7,16 @@ export interface Installation {
   updated_at: string;
 }
 
+// Mirrors backend/internal/modules/sync.Summary — the result of one
+// POST /sync/trigger call (or one background scheduler tick).
+export interface SyncSummary {
+  tenant_id: number;
+  location_mode: "flowpos" | "fallback_single_location";
+  locations_synced: number;
+  employees_synced: number;
+  employees_deactivated: number;
+}
+
 // Mirrors backend/internal/modules/location/model.go. timezone_confirmed is
 // false until an admin explicitly sets it (design resolution: "Location
 // timezone is a manually-managed field") — treat timezone as "UTC"
@@ -22,10 +32,14 @@ export interface Location {
   updated_at: string;
 }
 
-// Mirrors backend/internal/modules/employee/model.go
+// Mirrors backend/internal/modules/employee/model.go. location_id is null
+// until an admin assigns the employee to exactly one location — FlowPOS has
+// no employee-location relationship at all, so this is app-bookings-only
+// state, never something sync sets.
 export interface Employee {
   id: string;
-  location_id: string;
+  tenant_id: number;
+  location_id: string | null;
   flowpos_employee_id: string;
   name: string;
   email?: string;

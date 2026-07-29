@@ -29,9 +29,13 @@ func (s *Service) Propose(locationID string, in ProposeInput) (Proposal, error) 
 	if err != nil {
 		return Proposal{}, err
 	}
-	if !loc.TimezoneConfirmed {
-		return Proposal{}, ErrLocationTimezoneUnset
-	}
+	// TEMPORARY: the timezone-confirmation gate is disabled — every location
+	// defaults to (and stays) UTC until per-location timezone selection is
+	// built (see sync.Service.syncLocations). Re-enable this check then:
+	//
+	// if !loc.TimezoneConfirmed {
+	// 	return Proposal{}, ErrLocationTimezoneUnset
+	// }
 	tz, err := time.LoadLocation(loc.Timezone)
 	if err != nil {
 		return Proposal{}, fmt.Errorf("invalid location timezone %q: %w", loc.Timezone, err)

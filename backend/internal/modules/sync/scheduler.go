@@ -70,7 +70,7 @@ func (s *Scheduler) SyncAll(ctx context.Context) {
 			log.Printf("sync scheduler: tenant %d failed: %v", tenantID, err)
 			continue
 		}
-		log.Printf("sync scheduler: tenant %d: mode=%s locations=%d employees=%d deactivated=%d errors=%d",
-			tenantID, summary.LocationMode, summary.LocationsSynced, summary.EmployeesSynced, summary.EmployeesDeactivated, len(summary.LocationErrors))
+		log.Printf("sync scheduler: tenant %d: mode=%s locations=%d employees=%d deactivated=%d",
+			tenantID, summary.LocationMode, summary.LocationsSynced, summary.EmployeesSynced, summary.EmployeesDeactivated)
 	}
 }

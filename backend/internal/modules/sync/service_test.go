@@ -74,10 +74,24 @@ func envelope(w http.ResponseWriter, payload any) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": payload, "status": true})
 }
 
-// --- Fake FlowPOS server: two fixed locations; a single tenant-wide
-// employee list, since FlowPOS has no employee-to-location scoping
-// (confirmed against flowpos-backend's EmployeeController) — every location
-// gets the same list synced under its own location_id. ---
+// employeesHandler serves a single tenant-wide employee list — FlowPOS has
+// no employee-to-location scoping at all (confirmed against flowpos-
+// backend's EmployeeController), so it's synced exactly once per tenant,
+// never once per location. Every fake server below registers this same
+// handler shape (even when the list is empty) so a test never accidentally
+// hits an unregistered /employees route.
+func employeesHandler(employees []map[string]any) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		envelope(w, map[string]any{
+			"employees": map[string]any{
+				"data":         employees,
+				"current_page": 1,
+				"last_page":    1,
+				"total":        len(employees),
+			},
+		})
+	}
+}
 
 func fakeFlowposServer(t *testing.T, employees []map[string]any) *httptest.Server {
 	t.Helper()
@@ -90,20 +104,11 @@ func fakeFlowposServer(t *testing.T, employees []map[string]any) *httptest.Serve
 			},
 		})
 	})
-	mux.HandleFunc("/employees", func(w http.ResponseWriter, r *http.Request) {
-		envelope(w, map[string]any{
-			"employees": map[string]any{
-				"data":         employees,
-				"current_page": 1,
-				"last_page":    1,
-				"total":        len(employees),
-			},
-		})
-	})
+	mux.HandleFunc("/employees", employeesHandler(employees))
 	return httptest.NewServer(mux)
 }
 
-func TestSyncTenant_TwoLocations_TenantEmployeesAppliedToEachLocation(t *testing.T) {
+func TestSyncTenant_TwoLocations_EmployeesSyncedOncePerTenant(t *testing.T) {
 	conn := connectOrSkip(t)
 	instRepo := installation.NewRepository(conn)
 	locRepo := location.NewRepository(conn)
@@ -128,13 +133,10 @@ func TestSyncTenant_TwoLocations_TenantEmployeesAppliedToEachLocation(t *testing
 	if summary.LocationsSynced != 2 {
 		t.Fatalf("expected 2 locations synced, got %d", summary.LocationsSynced)
 	}
-	// FlowPOS has no location scoping for employees, so both employees are
-	// upserted at both locations: 2 employees x 2 locations = 4.
-	if summary.EmployeesSynced != 4 {
-		t.Fatalf("expected 4 employees synced (2 employees x 2 locations), got %d", summary.EmployeesSynced)
-	}
-	if len(summary.LocationErrors) != 0 {
-		t.Fatalf("expected no location errors, got %v", summary.LocationErrors)
+	// Employees are a separate, unrelated FlowPOS list — synced once per
+	// tenant regardless of how many locations exist, not once per location.
+	if summary.EmployeesSynced != 2 {
+		t.Fatalf("expected 2 employees synced (once per tenant, not per location), got %d", summary.EmployeesSynced)
 	}
 
 	locs, err := locRepo.ListByTenant(tenantID)
@@ -144,14 +146,16 @@ func TestSyncTenant_TwoLocations_TenantEmployeesAppliedToEachLocation(t *testing
 	if len(locs) != 2 {
 		t.Fatalf("expected 2 location rows in DB, got %d", len(locs))
 	}
-	for _, loc := range locs {
-		emps, err := empRepo.ListByLocation(loc.ID)
-		if err != nil {
-			t.Fatalf("ListByLocation: %v", err)
-		}
-		if len(emps) != 2 {
-			t.Fatalf("location %s: expected both tenant employees present, got %d", loc.FlowposLocationID, len(emps))
-		}
+
+	// Neither employee has been assigned to a location yet — that's a
+	// manual, admin-driven step (employee.Service.AssignLocation), not part
+	// of sync. Both should show up as unassigned.
+	unassigned, err := empRepo.ListUnassigned(tenantID)
+	if err != nil {
+		t.Fatalf("ListUnassigned: %v", err)
+	}
+	if len(unassigned) != 2 {
+		t.Fatalf("expected 2 unassigned employees after sync, got %d", len(unassigned))
 	}
 }
 
@@ -184,14 +188,12 @@ func TestSyncTenant_RunTwice_DoesNotDuplicate(t *testing.T) {
 		t.Fatalf("expected exactly 2 location rows after two syncs, got %d (duplicates created)", len(locs))
 	}
 
-	for _, loc := range locs {
-		emps, err := empRepo.ListByLocation(loc.ID)
-		if err != nil {
-			t.Fatalf("ListByLocation: %v", err)
-		}
-		if len(emps) != 3 {
-			t.Fatalf("location %s: expected 3 employee rows after two syncs, got %d (duplicates created)", loc.FlowposLocationID, len(emps))
-		}
+	unassigned, err := empRepo.ListUnassigned(tenantID)
+	if err != nil {
+		t.Fatalf("ListUnassigned: %v", err)
+	}
+	if len(unassigned) != 3 {
+		t.Fatalf("expected exactly 3 employee rows after two syncs, got %d (duplicates created)", len(unassigned))
 	}
 }
 
@@ -220,18 +222,13 @@ func TestSyncTenant_NewEmployeeAppears(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	// EmployeesSynced counts every employee upserted this run across both
-	// locations (Alice again plus the new hire, x2 locations), not just
-	// newly-created rows.
-	if summary.EmployeesSynced != 4 {
-		t.Fatalf("expected 4 employees synced on the second run (2 employees x 2 locations), got %d", summary.EmployeesSynced)
+	// EmployeesSynced counts every employee upserted this run, tenant-wide —
+	// Alice again plus the new hire.
+	if summary.EmployeesSynced != 2 {
+		t.Fatalf("expected 2 employees synced on the second run, got %d", summary.EmployeesSynced)
 	}
 
-	loc, err := locRepo.GetByTenantAndFlowposID(tenantID, "1")
-	if err != nil {
-		t.Fatalf("GetByTenantAndFlowposID: %v", err)
-	}
-	newHire, err := empRepo.GetByLocationAndFlowposID(loc.ID, "103")
+	newHire, err := empRepo.GetByTenantAndFlowposID(tenantID, "103")
 	if err != nil {
 		t.Fatalf("expected the new employee to exist after re-sync: %v", err)
 	}
@@ -259,19 +256,20 @@ func TestSyncTenant_RemovedEmployee_DeactivatedNotDeleted_BookingSegmentUntouche
 	if err != nil {
 		t.Fatalf("GetByTenantAndFlowposID: %v", err)
 	}
-	alice, err := empRepo.GetByLocationAndFlowposID(loc.ID, "101")
+	alice, err := empRepo.GetByTenantAndFlowposID(tenantID, "101")
 	if err != nil {
-		t.Fatalf("GetByLocationAndFlowposID: %v", err)
+		t.Fatalf("GetByTenantAndFlowposID: %v", err)
 	}
 
 	// Give Alice a service and a booking_segment referencing her, using raw
 	// SQL exactly like Phase 1's tests do — this module has no service/
 	// booking repositories yet (Phase 3/5), so this is fixture setup, not
-	// application code under test.
+	// application code under test. Alice doesn't need to be assigned to
+	// this (or any) location for this fixture — booking_segments reference
+	// an employee_id directly, not through location_id.
 	svcID, bookingID := seedServiceAndBooking(t, conn, loc.ID, alice.ID)
 
-	// FlowPOS no longer returns Alice at all (tenant-wide, so she disappears
-	// from every location at once).
+	// FlowPOS no longer returns Alice at all.
 	employees = nil
 	server2 := fakeFlowposServer(t, employees)
 	defer server2.Close()
@@ -281,12 +279,11 @@ func TestSyncTenant_RemovedEmployee_DeactivatedNotDeleted_BookingSegmentUntouche
 	if err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	// Alice is deactivated at both locations (1 per location x 2 locations).
-	if summary.EmployeesDeactivated != 2 {
-		t.Fatalf("expected 2 employees deactivated (1 per location), got %d", summary.EmployeesDeactivated)
+	if summary.EmployeesDeactivated != 1 {
+		t.Fatalf("expected 1 employee deactivated, got %d", summary.EmployeesDeactivated)
 	}
 
-	aliceAfter, err := empRepo.GetByLocationAndFlowposID(loc.ID, "101")
+	aliceAfter, err := empRepo.GetByTenantAndFlowposID(tenantID, "101")
 	if err != nil {
 		t.Fatalf("expected Alice's row to still exist (never deleted): %v", err)
 	}
@@ -329,9 +326,8 @@ func TestSyncTenant_MalformedEmployeeRecord_SkippedNotCrashed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected malformed rows to be skipped, not to fail the sync: %v", err)
 	}
-	// 1 valid employee per location x 2 locations (malformed rows skipped at each).
-	if summary.EmployeesSynced != 2 {
-		t.Fatalf("expected exactly 2 valid employees synced (malformed rows skipped), got %d", summary.EmployeesSynced)
+	if summary.EmployeesSynced != 1 {
+		t.Fatalf("expected exactly 1 valid employee synced (malformed rows skipped), got %d", summary.EmployeesSynced)
 	}
 }
 
@@ -346,16 +342,7 @@ func TestSyncTenant_LocationsEndpointMissing_FallsBackToSingleLocation(t *testin
 	mux.HandleFunc("/locations", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r) // simulates a FlowPOS install with no locations endpoint at all
 	})
-	mux.HandleFunc("/employees", func(w http.ResponseWriter, r *http.Request) {
-		envelope(w, map[string]any{
-			"employees": map[string]any{
-				"data":         []map[string]any{{"id": 301, "name": "Only Employee"}},
-				"current_page": 1,
-				"last_page":    1,
-				"total":        1,
-			},
-		})
-	})
+	mux.HandleFunc("/employees", employeesHandler([]map[string]any{{"id": 301, "name": "Only Employee"}}))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
@@ -394,6 +381,7 @@ func TestSyncTenant_LocationsEndpointReturnsEmptyArray_DoesNotTriggerFallback(t 
 	mux.HandleFunc("/locations", func(w http.ResponseWriter, r *http.Request) {
 		envelope(w, map[string]any{"locations": []map[string]any{}}) // legitimately zero locations
 	})
+	mux.HandleFunc("/employees", employeesHandler(nil))
 	server := httptest.NewServer(mux)
 	defer server.Close()
 

@@ -1,5 +1,5 @@
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Skeleton } from "@flowposltd/ui";
-import { MapPin, AlertTriangle } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { useLocationContext } from "@/contexts/location-context";
 
 // Every domain screen operates against whichever location is picked here —
@@ -23,12 +23,12 @@ export function LocationSwitcher() {
       <SelectContent>
         {locations.map((loc) => (
           <SelectItem key={loc.id} value={loc.id}>
-            <span className="flex items-center gap-1.5">
-              {loc.name}
-              {!loc.timezone_confirmed && (
-                <AlertTriangle className="size-3.5 text-destructive" />
-              )}
-            </span>
+            {/* TEMPORARY: timezone-unconfirmed warning icon dropped —
+                every location defaults to (and stays) UTC until
+                per-location timezone selection is built. Re-add once
+                that feature lands:
+                {!loc.timezone_confirmed && <AlertTriangle className="size-3.5 text-destructive" />} */}
+            <span className="flex items-center gap-1.5">{loc.name}</span>
           </SelectItem>
         ))}
       </SelectContent>

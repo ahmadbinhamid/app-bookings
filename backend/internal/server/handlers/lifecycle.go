@@ -2,14 +2,17 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 
 	"app-booking/internal/modules/installation"
+	"app-booking/internal/modules/sync"
 
 	"github.com/gin-gonic/gin"
 )
@@ -48,10 +51,11 @@ func SignatureMiddleware(secret string) gin.HandlerFunc {
 // directly (no tenant JWT): app install/uninstall and store event webhooks.
 type LifecycleHandler struct {
 	installations *installation.Service
+	sync          *sync.Service
 }
 
-func NewLifecycleHandler(installations *installation.Service) *LifecycleHandler {
-	return &LifecycleHandler{installations: installations}
+func NewLifecycleHandler(installations *installation.Service, syncSvc *sync.Service) *LifecycleHandler {
+	return &LifecycleHandler{installations: installations, sync: syncSvc}
 }
 
 // lifecyclePayload covers the body shape FlowPOS sends to all three
@@ -78,6 +82,20 @@ func (h *LifecycleHandler) Install(c *gin.Context) {
 		respondErr(c, err)
 		return
 	}
+
+	// Kick off a first sync right away instead of leaving a freshly-installed
+	// tenant with nothing until the scheduler's next tick (up to
+	// cfg.SyncInterval later — an hour by default). Backgrounded with its own
+	// context (not c.Request.Context(), which is cancelled the moment this
+	// handler returns) so the install response isn't held up waiting on
+	// FlowPOS's own API; failures are logged, not surfaced to the installer,
+	// since /install already succeeded and the scheduler will retry anyway.
+	go func() {
+		if _, err := h.sync.SyncTenant(context.Background(), in.TenantID); err != nil {
+			log.Printf("initial sync after install failed for tenant %d: %v", in.TenantID, err)
+		}
+	}()
+
 	c.JSON(http.StatusOK, gin.H{"installation": inst})
 }
 

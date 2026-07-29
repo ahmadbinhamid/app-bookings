@@ -53,15 +53,6 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	instRepo := installation.NewRepository(conn)
 	instSvc := installation.NewService(instRepo)
 
-	// Marketplace lifecycle: FlowPOS calls these directly (no tenant JWT),
-	// signing each request with this app's signing secret. Mounted at the
-	// public root, not under /api, per the marketplace listing contract.
-	lifecycle := handlers.NewLifecycleHandler(instSvc)
-	verifySignature := handlers.SignatureMiddleware(cfg.SigningSecret)
-	r.POST("/install", verifySignature, lifecycle.Install)
-	r.POST("/uninstall", verifySignature, lifecycle.Uninstall)
-	r.POST("/webhooks", verifySignature, lifecycle.Webhook)
-
 	api := r.Group("/api/v1")
 
 	// Dev-only: mint a JWT for local testing (the real token is delivered by
@@ -79,7 +70,28 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	locRepo := location.NewRepository(conn)
 	locSvc := location.NewService(locRepo)
 	empRepo := employee.NewRepository(conn)
-	empSvc := employee.NewService(empRepo)
+
+	// FlowPOS sync feature: pulls locations + employees per tenant. See
+	// internal/modules/sync for the orchestration and internal/flowpos for
+	// the API client — instRepo is reused directly here since sync needs the
+	// raw api_key, which the installation *service* doesn't expose (its
+	// Installation JSON marshals APIKey as "-"). Built here (rather than
+	// further down, where it originally lived) so the lifecycle handler
+	// below can trigger an immediate sync on install — a tenant that just
+	// installed shouldn't have to wait up to an hour for the scheduler's
+	// next tick, or need an admin to know a manual-trigger endpoint exists.
+	flowposClient := flowpos.NewClient(cfg.FlowposAPIURL)
+	syncSvc := sync.NewService(locRepo, empRepo, instRepo, flowposClient)
+
+	// Marketplace lifecycle: FlowPOS calls these directly (no tenant JWT),
+	// signing each request with this app's signing secret. Mounted at the
+	// public root, not under /api, per the marketplace listing contract.
+	lifecycle := handlers.NewLifecycleHandler(instSvc, syncSvc)
+	verifySignature := handlers.SignatureMiddleware(cfg.SigningSecret)
+	r.POST("/install", verifySignature, lifecycle.Install)
+	r.POST("/uninstall", verifySignature, lifecycle.Uninstall)
+	r.POST("/webhooks", verifySignature, lifecycle.Webhook)
+
 	svcRepo := services.NewRepository(conn)
 	svcSvc := services.NewService(svcRepo)
 	assignRepo := assignments.NewRepository(conn)
@@ -90,9 +102,13 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	timeOffSvc := timeoff.NewService(timeOffRepo)
 	bookingRepo := booking.NewRepository(conn)
 	bookingSvc := booking.NewService(bookingRepo, svcSvc, locSvc)
+	// empSvc depends on bookingRepo (as employee.BookingConflictChecker) to
+	// block AssignLocation from moving an employee off a location where they
+	// still have future bookings — see employee.Service.AssignLocation.
+	empSvc := employee.NewService(empRepo, bookingRepo)
 
 	locationHandler := handlers.NewLocationHandler(locSvc)
-	employeeHandler := handlers.NewEmployeeHandler(empSvc)
+	employeeHandler := handlers.NewEmployeeHandler(empSvc, locSvc)
 	serviceHandler := handlers.NewServiceHandler(svcSvc)
 	assignmentHandler := handlers.NewAssignmentHandler(assignSvc, empSvc)
 	scheduleHandler := handlers.NewScheduleHandler(scheduleSvc)
@@ -100,6 +116,14 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	bookingHandler := handlers.NewBookingHandler(bookingSvc)
 
 	protected.GET("/locations", locationHandler.List)
+
+	// Tenant-wide employee routes — NOT nested under /locations/:locationId,
+	// since assigning an employee reaches across (or out of) a location, not
+	// within one already-verified one. Each verifies tenant ownership itself
+	// — see EmployeeHandler.AssignLocation's doc comment.
+	protected.GET("/employees", employeeHandler.ListAll)
+	protected.GET("/employees/unassigned", employeeHandler.ListUnassigned)
+	protected.PATCH("/employees/:employeeId/location", employeeHandler.AssignLocation)
 
 	// Every route below is nested under a specific, tenant-owned location —
 	// RequireLocationOwnership (internal/server/handlers/ownership.go) is
@@ -152,13 +176,9 @@ func New(cfg config.Config, conn *sql.DB) *Server {
 	bookingItemGroup.POST("/segments/:segmentId/cancel", bookingHandler.CancelSegment)
 	bookingItemGroup.PATCH("/segments/:segmentId/complete", bookingHandler.CompleteSegment)
 
-	// FlowPOS sync feature: pulls locations + employees per tenant. See
-	// internal/modules/sync for the orchestration and internal/flowpos for
-	// the API client — instRepo is reused directly here since sync needs the
-	// raw api_key, which the installation *service* doesn't expose (its
-	// Installation JSON marshals APIKey as "-").
-	flowposClient := flowpos.NewClient(cfg.FlowposAPIURL)
-	syncSvc := sync.NewService(locRepo, empRepo, instRepo, flowposClient)
+	// syncSvc itself was built earlier (see above, near locRepo/empRepo) so
+	// the lifecycle handler could use it too — just the route + scheduler
+	// wiring is left to do here.
 	protected.POST("/sync/trigger", handlers.NewSyncHandler(syncSvc).Trigger)
 	syncScheduler := sync.NewScheduler(instRepo, syncSvc, cfg.SyncInterval)
 
