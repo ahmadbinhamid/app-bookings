@@ -63,17 +63,28 @@ func TestPropose_GapExample_HaircutThenFacial(t *testing.T) {
 	}
 }
 
-func TestPropose_LocationTimezoneUnset_Rejected(t *testing.T) {
+// TEMPORARY: the timezone-confirmation gate itself is disabled (see
+// Service.Propose's doc comment — every location defaults to and stays UTC
+// until per-location timezone selection is built), so this now asserts the
+// opposite of its old name: Propose must still work against an unconfirmed
+// location rather than reject it. Restore the original rejection assertion
+// once that gate is re-enabled.
+func TestPropose_LocationTimezoneUnconfirmed_StillWorks(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID := seedLocationTZ(t, conn, "UTC", false) // NOT confirmed
+	barber := seedEmployeeAt(t, conn, locID, "Barber A")
+	haircut := seedServiceAt(t, conn, locID, "Haircut", 30, 0, 25)
+	seedAssignment(t, conn, barber, haircut)
+	monday := nextWeekday(time.Now().UTC(), time.Monday)
+	seedSchedule(t, conn, barber, int(time.Monday), "09:00:00", "17:00:00")
 
 	_, err := svc.Propose(locID, ProposeInput{
-		Services:      []ServiceRequest{{ServiceID: "irrelevant"}},
-		EarliestStart: time.Now().Add(24 * time.Hour),
+		Services:      []ServiceRequest{{ServiceID: haircut}},
+		EarliestStart: monday.Add(10 * time.Hour),
 	})
-	if err != ErrLocationTimezoneUnset {
-		t.Fatalf("expected ErrLocationTimezoneUnset, got %v", err)
+	if err != nil {
+		t.Fatalf("expected Propose to succeed against an unconfirmed-timezone location while the gate is disabled, got: %v", err)
 	}
 }
 

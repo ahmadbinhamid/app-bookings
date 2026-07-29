@@ -8,7 +8,7 @@ import { DatePopover } from "@/components/ui/calendar-popover";
 import { TimePopover } from "@/components/ui/time-popover";
 import { listTimeOff, createTimeOff, deleteTimeOff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { combineDateAndMinutes, toISODateLocal } from "@/utils";
+import { combineDateAndMinutes, toISODateUTC } from "@/utils";
 import { useLocationTimezone } from "@/hooks/use-location-timezone";
 
 interface EmployeeTimeOffEditorProps {
@@ -26,7 +26,9 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
     queryFn: () => listTimeOff(locationId, employeeId),
   });
 
-  const today = toISODateLocal(new Date());
+  // UTC — every location is currently hardcoded to UTC, and combineDateAndMinutes
+  // below treats the picked date/time as that location's wall clock.
+  const today = toISODateUTC(new Date());
   const [startDate, setStartDate] = useState(today);
   const [startMinutes, setStartMinutes] = useState(0);
   const [endDate, setEndDate] = useState(today);

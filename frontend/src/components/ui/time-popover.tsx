@@ -18,10 +18,12 @@ interface TimePopoverProps {
   onChange: (minutes: number) => void;
   stepMinutes?: number;
   className?: string;
+  /** Times before this (minutes since midnight) are shown grayed out and unpickable. */
+  minMinutes?: number;
 }
 
 /** Scrollable time-of-day list popover — no native time input. */
-export function TimePopover({ value, onChange, stepMinutes = 15, className }: TimePopoverProps) {
+export function TimePopover({ value, onChange, stepMinutes = 15, className, minMinutes }: TimePopoverProps) {
   const [open, setOpen] = useState(false);
   const { triggerRef, popoverRef, pos, updatePos } = usePopoverAnchor<HTMLButtonElement, HTMLDivElement>(
     open,
@@ -86,23 +88,31 @@ export function TimePopover({ value, onChange, stepMinutes = 15, className }: Ti
             }}
           >
             <div ref={listRef}>
-              {times.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  data-minutes={t}
-                  onClick={() => {
-                    onChange(t);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "block w-full text-left px-3 py-2 rounded text-body-3 font-medium tabular-nums transition-colors",
-                    t === value ? "bg-primary/10 text-primary font-medium" : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  {formatMinutesOfDay(t)}
-                </button>
-              ))}
+              {times.map((t) => {
+                const tooEarly = minMinutes !== undefined && t < minMinutes;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    data-minutes={t}
+                    disabled={tooEarly}
+                    onClick={() => {
+                      onChange(t);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "block w-full text-left px-3 py-2 rounded text-body-3 font-medium tabular-nums transition-colors",
+                      tooEarly
+                        ? "text-content-tertiary/40 cursor-not-allowed hover:bg-transparent"
+                        : t === value
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground hover:bg-muted"
+                    )}
+                  >
+                    {formatMinutesOfDay(t)}
+                  </button>
+                );
+              })}
             </div>
           </div>,
           document.body

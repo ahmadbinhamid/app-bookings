@@ -100,10 +100,12 @@ interface DatePopoverProps {
   onChange: (iso: string) => void;
   placeholder?: string;
   className?: string;
+  /** Dates before this (ISO yyyy-mm-dd) are shown grayed out and unpickable. */
+  minISO?: string;
 }
 
 /** Single-date field — day-grid popover, no native date input. */
-export function DatePopover({ value, onChange, placeholder = "Select date", className }: DatePopoverProps) {
+export function DatePopover({ value, onChange, placeholder = "Select date", className, minISO }: DatePopoverProps) {
   const [open, setOpen] = useState(false);
   const [cursor, setCursor] = useState(() => parseISODate(value ?? toISODate(new Date())));
   const { triggerRef, popoverRef, pos, updatePos } = usePopoverAnchor<HTMLButtonElement, HTMLDivElement>(
@@ -161,26 +163,30 @@ export function DatePopover({ value, onChange, placeholder = "Select date", clas
             />
             <WeekdayRow />
             <div className="grid grid-cols-7 gap-0.5">
-              {cells.map((c) => (
-                <button
-                  key={c.iso}
-                  type="button"
-                  disabled={!c.inMonth}
-                  onClick={() => {
-                    onChange(c.iso);
-                    setOpen(false);
-                  }}
-                  className={cn(
-                    "size-9 rounded text-body-3 font-medium grid place-items-center transition-colors",
-                    !c.inMonth && "invisible",
-                    c.inMonth && c.iso === value
-                      ? "bg-primary text-primary-foreground font-medium"
-                      : "text-foreground hover:bg-muted"
-                  )}
-                >
-                  {c.date.getDate()}
-                </button>
-              ))}
+              {cells.map((c) => {
+                const tooEarly = Boolean(minISO && c.iso < minISO);
+                return (
+                  <button
+                    key={c.iso}
+                    type="button"
+                    disabled={!c.inMonth || tooEarly}
+                    onClick={() => {
+                      onChange(c.iso);
+                      setOpen(false);
+                    }}
+                    className={cn(
+                      "size-9 rounded text-body-3 font-medium grid place-items-center transition-colors",
+                      !c.inMonth && "invisible",
+                      c.inMonth && tooEarly && "text-content-tertiary/40 cursor-not-allowed hover:bg-transparent",
+                      c.inMonth && !tooEarly && c.iso === value
+                        ? "bg-primary text-primary-foreground font-medium"
+                        : c.inMonth && !tooEarly && "text-foreground hover:bg-muted"
+                    )}
+                  >
+                    {c.date.getDate()}
+                  </button>
+                );
+              })}
             </div>
           </div>,
           document.body

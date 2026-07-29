@@ -20,10 +20,35 @@ func NewService(repo *Repository, servicesSvc *services.MyService, locationsSvc 
 	return &Service{repo: repo, services: servicesSvc, locations: locationsSvc}
 }
 
+// maxDaysBackward bounds how far before the requested date Propose will look
+// for a "before" candidate (see Propose's doc comment) — a bookable slot
+// more than this many days before what was actually asked for isn't a
+// useful alternative, so this is also what keeps a hopeless search (nothing
+// booked for months) from walking back indefinitely.
+const maxDaysBackward = 3
+
+// maxSolvesPerDay bounds how many times Propose re-solves a single day
+// (each time advancing the cursor past the previous result) while walking
+// it end to end looking for a "before" candidate — a safety cap against a
+// pathological day, not a realistic limit.
+const maxSolvesPerDay = 500
+
 // Propose runs the design doc's solveBooking end to end: resolves the
 // location's timezone, gathers qualified-and-free candidates per service,
 // and calls the pure solver. Nothing is persisted — this is the fully-
 // optimistic "proposal" step (design doc, Proposal holds decision).
+//
+// Returns whichever of these two candidates is closer to earliest_start,
+// not simply the earliest chronological opening — a request for "4:30 PM"
+// should come back near 4:30 PM, not at 11:30 AM just because that
+// happened to be free first:
+//   - "after": the earliest fit at or after earliest_start (solver.Solve's
+//     ordinary behavior).
+//   - "before": the latest fit at or before earliest_start, found by
+//     walking that day (and up to maxDaysBackward earlier days, if that day
+//     has nothing before earliest_start) forward from its own start,
+//     re-solving with an advancing cursor until a result would land after
+//     earliest_start, and keeping the last one that didn't.
 func (s *Service) Propose(locationID string, in ProposeInput) (Proposal, error) {
 	loc, err := s.locations.GetByID(locationID)
 	if err != nil {
@@ -42,36 +67,122 @@ func (s *Service) Propose(locationID string, in ProposeInput) (Proposal, error) 
 	}
 
 	now := time.Now().UTC()
-	earliest := in.EarliestStart
-	if earliest.Before(now) {
-		// Solve() itself also clamps, but targetDate below is derived from
-		// earliest — if it were left in the past, targetDate could resolve
-		// to a day that's already over instead of "today."
-		earliest = now
+	requested := in.EarliestStart
+	if requested.Before(now) {
+		// Solve() itself also clamps, but the day derived from requested
+		// below must not land on one that's already over.
+		requested = now
 	}
-	localEarliest := earliest.In(tz)
-	targetDate := time.Date(localEarliest.Year(), localEarliest.Month(), localEarliest.Day(), 0, 0, 0, 0, time.UTC)
 
-	requests := make([]solver.ServiceRequest, 0, len(in.Services))
-	for _, sv := range in.Services {
+	requestedDate, _ := dayBounds(requested, tz)
+	requests, err := s.buildSolverRequests(locationID, in.Services, requestedDate, tz)
+	if err != nil {
+		return Proposal{}, err
+	}
+
+	after, afterErr := solver.Solve(requests, requested, now)
+
+	// Nothing before requested could possibly beat an exact match — skip
+	// walking backward through the day entirely in what's the common case
+	// (the requested time itself turns out to be free).
+	if afterErr == nil && after.Segments[0].Start.Equal(requested) {
+		return toProposal(after), nil
+	}
+
+	before, err := s.findLatestBefore(locationID, in.Services, requested, requestedDate, tz, now)
+	if err != nil {
+		return Proposal{}, err
+	}
+
+	switch {
+	case before == nil && afterErr != nil:
+		return Proposal{}, afterErr
+	case before == nil:
+		return toProposal(after), nil
+	case afterErr != nil:
+		return toProposal(*before), nil
+	case requested.Sub(before.Segments[0].Start) <= after.Segments[0].Start.Sub(requested):
+		return toProposal(*before), nil
+	default:
+		return toProposal(after), nil
+	}
+}
+
+// findLatestBefore looks for the latest possible fit at or before requested,
+// starting with requested's own calendar day and, only if that day has
+// nothing before requested, stepping back one day at a time (up to
+// maxDaysBackward) until one is found. Returns nil (not an error) if there
+// simply isn't one within that lookback window.
+func (s *Service) findLatestBefore(
+	locationID string, in []ServiceRequest, requested, requestedDate time.Time, tz *time.Location, now time.Time,
+) (*solver.Proposal, error) {
+	for daysBack := 0; daysBack <= maxDaysBackward; daysBack++ {
+		date, dayStart := dayBounds(requestedDate.AddDate(0, 0, -daysBack), tz)
+		requests, err := s.buildSolverRequests(locationID, in, date, tz)
+		if err != nil {
+			return nil, err
+		}
+
+		var best *solver.Proposal
+		cursor := dayStart
+		for i := 0; i < maxSolvesPerDay; i++ {
+			p, err := solver.Solve(requests, cursor, now)
+			if err != nil {
+				break // nothing more to find this day
+			}
+			if p.Segments[0].Start.After(requested) {
+				break // this and everything after it is now too late
+			}
+			best = &p
+			cursor = p.Segments[len(p.Segments)-1].End
+		}
+		if best != nil {
+			return best, nil
+		}
+	}
+	return nil, nil
+}
+
+// dayBounds splits instant (in loc's timezone) into targetDate — a plain
+// calendar-date bucket, Y/M/D only, matching freeIntervalsFor's own
+// convention (see availability.go's doc comment on why it's built this way
+// rather than from a real instant) — and dayStart, the actual absolute UTC
+// instant of that day's local midnight, DST-safe since it's built via
+// time.Date in loc rather than fixed-offset arithmetic.
+func dayBounds(instant time.Time, tz *time.Location) (targetDate, dayStart time.Time) {
+	local := instant.In(tz)
+	y, m, d := local.Date()
+	targetDate = time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	dayStart = time.Date(y, m, d, 0, 0, 0, 0, tz).UTC()
+	return
+}
+
+// buildSolverRequests resolves each requested service's qualified, active
+// employees and their free intervals on targetDate into the solver's input
+// shape — split out of Propose so findLatestBefore can reuse it once per
+// calendar day it actually needs to look at, rather than once for the whole
+// (potentially multi-day) search.
+func (s *Service) buildSolverRequests(locationID string, in []ServiceRequest, targetDate time.Time, tz *time.Location) ([]solver.ServiceRequest, error) {
+	requests := make([]solver.ServiceRequest, 0, len(in))
+	for _, sv := range in {
 		svc, err := s.services.Get(sv.ServiceID)
 		if err != nil {
-			return Proposal{}, err
+			return nil, err
 		}
 		if svc.LocationID != locationID {
-			return Proposal{}, services.ErrNotFound
+			return nil, services.ErrNotFound
 		}
 
 		employeeIDs, err := s.repo.QualifiedActiveEmployeeIDs(sv.ServiceID)
 		if err != nil {
-			return Proposal{}, err
+			return nil, err
 		}
 
 		candidates := make([]solver.CandidateEmployee, 0, len(employeeIDs))
 		for _, empID := range employeeIDs {
 			free, err := freeIntervalsFor(s.repo.db, empID, targetDate, tz)
 			if err != nil {
-				return Proposal{}, err
+				return nil, err
 			}
 			candidates = append(candidates, solver.CandidateEmployee{EmployeeID: empID, FreeIntervals: free})
 		}
@@ -84,12 +195,7 @@ func (s *Service) Propose(locationID string, in ProposeInput) (Proposal, error) 
 			Candidates:      candidates,
 		})
 	}
-
-	result, err := solver.Solve(requests, in.EarliestStart, now)
-	if err != nil {
-		return Proposal{}, err
-	}
-	return toProposal(result), nil
+	return requests, nil
 }
 
 func toProposal(p solver.Proposal) Proposal {

@@ -21,6 +21,14 @@ export function formatTimeRange(startIso: string, endIso: string, timeZone?: str
   return `${formatTime(startIso, timeZone)} – ${formatTime(endIso, timeZone)}`;
 }
 
-export function formatShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+// timeZone should always be the booking location's own IANA zone — see
+// formatTime's doc comment above for why.
+export function formatShortDate(iso: string, timeZone?: string): string {
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric", timeZone });
+}
+
+// "Jul 30, 4:30 PM" — date + time together, for anywhere a proposed/
+// confirmed slot is shown without other obvious date context nearby.
+export function formatDateTime(iso: string, timeZone?: string): string {
+  return `${formatShortDate(iso, timeZone)}, ${formatTime(iso, timeZone)}`;
 }

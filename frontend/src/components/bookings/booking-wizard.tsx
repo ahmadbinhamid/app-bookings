@@ -16,7 +16,7 @@ import { ApiError } from "@/lib/api/client";
 import { proposeBooking, confirmBooking, rescheduleBooking, listServices, listEmployees } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { serviceVisual } from "@/constants/service-visuals";
-import { cn, formatMoney, formatDuration, formatTime, formatTimeRange, buildTimeline, toISODateLocal, combineDateAndMinutes } from "@/utils";
+import { cn, formatMoney, formatDuration, formatDateTime, formatTimeRange, buildTimeline, toISODateUTC, combineDateAndMinutes } from "@/utils";
 import { useLocationTimezone } from "@/hooks/use-location-timezone";
 import { type Proposal, type Service, type Employee } from "@/types";
 
@@ -34,11 +34,21 @@ interface BookingWizardProps {
 type Step = "select" | "review";
 
 // An hour from now, minutes rounded up to the next quarter hour — a sane
-// starting point for "earliest start" before the admin adjusts it.
+// starting point for "earliest start" before the admin adjusts it. In UTC —
+// every location is currently hardcoded to UTC (see toISODateUTC's doc
+// comment), so "now" for this picker means UTC now, not the browser's local
+// clock.
 function defaultEarliest(): { date: string; minutes: number } {
   const d = new Date(Date.now() + 60 * 60 * 1000);
-  const raw = d.getHours() * 60 + d.getMinutes();
-  return { date: toISODateLocal(d), minutes: Math.ceil(raw / 15) * 15 };
+  const raw = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return { date: toISODateUTC(d), minutes: Math.ceil(raw / 15) * 15 };
+}
+
+// UTC "now," as a date + minutes-of-day pair — the floor a picked earliest
+// start can never go below.
+function nowFloor(): { date: string; minutes: number } {
+  const d = new Date();
+  return { date: toISODateUTC(d), minutes: d.getUTCHours() * 60 + d.getUTCMinutes() };
 }
 
 export function BookingWizard({ open, onClose, locationId, bookingId, initialServiceIds }: BookingWizardProps) {
@@ -179,6 +189,13 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   const totalMinutes = selectedServices.reduce((a, s) => a + s.duration_minutes, 0);
   const totalPrice = selectedServices.reduce((a, s) => a + s.price, 0);
 
+  // Recomputed on every render (not memoized) so it stays accurate even if
+  // real time passes while this dialog sits open — a backstop behind the
+  // picker's own min-date/min-time graying-out, for the rare case a
+  // previously-valid selection ages into the past before submission.
+  const floor = nowFloor();
+  const isPast = earliestDate < floor.date || (earliestDate === floor.date && earliestMinutes < floor.minutes);
+
   const proposalTimeline =
     proposal &&
     buildTimeline(
@@ -198,8 +215,8 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
           <DialogTitle>{isReschedule ? "Reschedule booking" : "New booking"}</DialogTitle>
           <DialogDescription>
             {step === "select"
-              ? "Pick the services and the earliest time to look from."
-              : "Slots found — review the timeline below before confirming."}
+              ? "Pick the services and your preferred time."
+              : "Slot found — review the timeline below before confirming."}
           </DialogDescription>
         </DialogHeader>
 
@@ -265,14 +282,24 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
 
               <div>
                 <span className="text-body-2 font-medium text-foreground block mb-2.5">
-                  Earliest start<span className="text-destructive ml-0.5">*</span>
+                  Preferred start<span className="text-destructive ml-0.5">*</span>
                 </span>
                 <div className="flex flex-col gap-2.5 sm:flex-row">
-                  <DatePopover value={earliestDate} onChange={setEarliestDate} className="sm:flex-[1.3]" />
-                  <TimePopover value={earliestMinutes} onChange={setEarliestMinutes} className="sm:flex-1" />
+                  <DatePopover value={earliestDate} onChange={setEarliestDate} minISO={floor.date} className="sm:flex-[1.3]" />
+                  <TimePopover
+                    value={earliestMinutes}
+                    onChange={setEarliestMinutes}
+                    minMinutes={earliestDate === floor.date ? floor.minutes : undefined}
+                    className="sm:flex-1"
+                  />
                 </div>
+                {isPast && (
+                  <p className="text-body-3 text-destructive mt-1.5">
+                    That time has already passed — pick a time in the future.
+                  </p>
+                )}
                 <p className="text-body-3 text-content-tertiary mt-1.5">
-                  The solver looks for the first available slot at or after this time.
+                  We'll find the closest available slot to this — before or after, whichever is nearer.
                 </p>
               </div>
 
@@ -302,7 +329,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
               <Button
                 onClick={handleFindTimes}
                 loading={proposeMut.isPending}
-                disabled={selectedServiceIds.length === 0}
+                disabled={selectedServiceIds.length === 0 || isPast}
               >
                 Find times
                 <ArrowRight className="size-3.5" />
@@ -317,8 +344,8 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
               <div className="flex items-start gap-2.5 rounded-md border border-transparent bg-tag-success p-3.5">
                 <CheckCircle2 className="size-4.5 shrink-0 text-tag-success-text" />
                 <p className="text-body-2 text-tag-success-text">
-                  <b>Slots found.</b> First available fit starting {formatTime(proposal.segments[0].start, timeZone)}. Review
-                  the timeline below.
+                  <b>Slot found.</b> Nearest available fit to what you asked for:{" "}
+                  <b>{formatDateTime(proposal.segments[0].start, timeZone)}</b>. Review the timeline below.
                 </p>
               </div>
 
