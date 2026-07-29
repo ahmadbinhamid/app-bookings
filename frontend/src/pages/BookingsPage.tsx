@@ -12,16 +12,14 @@ import { queryKeys } from "@/lib/query-keys";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageFallback } from "@/components/ui/page-fallback";
 import { PersonAvatar } from "@/components/ui/person-avatar";
-import { BookingTimeline } from "@/components/ui/booking-timeline";
 import { DateRangePopover, type SimpleDateRange } from "@/components/ui/calendar-popover";
 import { BookingWizard } from "@/components/bookings/booking-wizard";
 import { BookingDetailDialog } from "@/components/bookings/booking-detail-dialog";
 import { useLocationContext } from "@/contexts/location-context";
 import { useLocationTimezone } from "@/hooks/use-location-timezone";
 import { BOOKING_STATUS } from "@/constants";
-import { cn, formatMoney, buildTimeline } from "@/utils";
+import { cn, formatMoney, formatTimeRange } from "@/utils";
 import { serviceVisual } from "@/constants/service-visuals";
-import type { Booking } from "@/types";
 
 // "YYYY-MM-DD" (from the date-range popover) → start/end-of-day ISO instants
 // in the browser's local time, matching what the backend's from/to query
@@ -41,9 +39,10 @@ type StatusFilter = (typeof STATUS_FILTERS)[number];
 // with the full list on hover.
 const MAX_VISIBLE_CHIPS = 2;
 
-function activeSegments(booking: Booking) {
-  return (booking.segments ?? []).filter((s) => s.status !== "cancelled");
-}
+// Every segment, active or cancelled — cancelling never deletes anything on
+// the backend (only flips status), so a fully-cancelled booking still has
+// its original service/employee/schedule data and should keep showing it
+// rather than collapsing to "No services" / "No appointments".
 
 export default function BookingsPage() {
   const { selectedLocationId, isLoading: locationsLoading } = useLocationContext();
@@ -175,17 +174,15 @@ export default function BookingsPage() {
             </TableHeader>
             <TableBody>
               {shown.map((b) => {
-                const segs = activeSegments(b);
+                const segs = b.segments ?? [];
                 const chips = [...new Set(segs.map((s) => serviceByID.get(s.service_id)?.name ?? s.service_id))];
                 const team = [...new Set(segs.map((s) => s.employee_id))].map((id) => employeeByID.get(id)?.name ?? id);
-                const timeline = buildTimeline(
-                  segs.map((s) => ({
-                    key: s.id,
-                    name: serviceByID.get(s.service_id)?.name ?? s.service_id,
-                    start: s.start_time,
-                    end: s.end_time,
-                  })),
-                  timeZone
+                // A multi-service booking has several time slots — the table
+                // row shows only the latest one so it stays scannable; every
+                // slot is still visible in the detail dialog.
+                const latestSeg = segs.reduce<(typeof segs)[number] | undefined>(
+                  (latest, s) => (!latest || s.start_time > latest.start_time ? s : latest),
+                  undefined
                 );
                 const status = BOOKING_STATUS[b.status];
 
@@ -253,29 +250,15 @@ export default function BookingsPage() {
                     </TableCell>
 
                     <TableCell>
-                      {segs.length === 0 ? (
+                      {!latestSeg ? (
                         <span className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-body-3 font-medium bg-muted text-content-tertiary">
                           No appointments
                         </span>
-                      ) : timeline ? (
-                        <div className="w-24">
-                          <BookingTimeline
-                            timeline={timeline}
-                            segments={segs.map((s) => ({ key: s.id, name: serviceByID.get(s.service_id)?.name ?? s.service_id, start: s.start_time, end: s.end_time }))}
-                            variant="mini"
-                            timeZone={timeZone}
-                          />
-                          <div className="mt-1.5 text-body-3 text-content-secondary tabular-nums">
-                            <div className="whitespace-nowrap">{timeline.startLabel} – {timeline.endLabel}</div>
-                            {timeline.totalGapMinutes > 0 && (
-                              <div className="inline-flex items-center gap-1 text-amber-700 whitespace-nowrap">
-                                <span className="size-1 rounded-full bg-amber-500" />
-                                {timeline.totalGapMinutes} min gap
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ) : null}
+                      ) : (
+                        <span className="text-body-3 text-content-secondary tabular-nums whitespace-nowrap">
+                          {formatTimeRange(latestSeg.start_time, latestSeg.end_time, timeZone)}
+                        </span>
+                      )}
                     </TableCell>
 
                     <TableCell className="tabular-nums text-content-secondary font-medium">

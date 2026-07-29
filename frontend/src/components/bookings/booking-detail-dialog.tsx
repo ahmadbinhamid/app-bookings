@@ -120,20 +120,37 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
         </DialogHeader>
 
         <DialogBody>
-          {isEmpty ? (
-            <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border bg-muted/30 p-8 text-center">
-              <div className="flex size-12 items-center justify-center rounded-md bg-destructive/10 text-destructive">
-                <CalendarOff className="size-6" />
+          <div className="flex flex-col gap-1">
+            {/* Cancelling never deletes anything on the backend (only flips
+                segment status) — a fully-cancelled booking still has its
+                original service/employee/schedule data below, this is just
+                an additional heads-up banner, not a replacement for it. */}
+            {isEmpty && segments.length > 0 && (
+              <div className="flex items-center gap-3 rounded-md border border-dashed border-border bg-muted/30 p-4 mb-3.5">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+                  <CalendarOff className="size-4.5" />
+                </div>
+                <div>
+                  <p className="font-medium text-body-2 text-foreground">This booking was cancelled</p>
+                  <p className="text-body-3 text-content-secondary">The original slots were released back to the calendar.</p>
+                </div>
               </div>
-              <div>
-                <p className="font-medium text-body-2 text-foreground">This booking was cancelled</p>
-                <p className="text-body-3 text-content-secondary mt-1">
-                  No appointments are scheduled. The original slots were released back to the calendar.
-                </p>
+            )}
+
+            {segments.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 rounded-md border border-dashed border-border bg-muted/30 p-8 text-center">
+                <div className="flex size-12 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+                  <CalendarOff className="size-6" />
+                </div>
+                <div>
+                  <p className="font-medium text-body-2 text-foreground">No appointment details available</p>
+                  <p className="text-body-3 text-content-secondary mt-1">
+                    This booking has no service or schedule data on record.
+                  </p>
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-1">
+            ) : (
+              <>
               <div className="text-body-3 font-medium tracking-[0.06em] text-content-tertiary mb-2.5">
                 APPOINTMENT TIMELINE
               </div>
@@ -212,13 +229,14 @@ export function BookingDetailDialog({ open, onClose, locationId, bookingId, onRe
                   );
                 })}
               </div>
+              </>
+            )}
 
-              <div className="flex items-center justify-between border-t border-border pt-3.5 mt-4">
-                <span className="text-body-2 text-content-secondary">Total</span>
-                <span className="text-heading-3 font-semibold tabular-nums">{formatMoney(booking.total_price)}</span>
-              </div>
+            <div className="flex items-center justify-between border-t border-border pt-3.5 mt-4">
+              <span className="text-body-2 text-content-secondary">Total</span>
+              <span className="text-heading-3 font-semibold tabular-nums">{formatMoney(booking.total_price)}</span>
             </div>
-          )}
+          </div>
         </DialogBody>
 
         <DialogFooter>
