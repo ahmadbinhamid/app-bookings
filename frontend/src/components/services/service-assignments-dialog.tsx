@@ -99,8 +99,8 @@ export function ServiceAssignmentsDialog({ open, onClose, locationId, service }:
           {isLoading && <p className="text-body-2 text-content-secondary p-2">Loading…</p>}
           {!isLoading && matched.length === 0 && (
             <div className="py-10 text-center">
-              <p className="text-body-2 font-medium text-foreground">No matches</p>
-              <p className="text-body-3 text-content-secondary mt-0.5">No employees match "{search}".</p>
+              <p className="text-body-2 font-medium text-foreground">No Employees Found</p>
+              {/* <p className="text-body-3 text-content-secondary mt-0.5">No employees match "{search}".</p> */}
             </div>
           )}
           {matched.map((emp) => {
