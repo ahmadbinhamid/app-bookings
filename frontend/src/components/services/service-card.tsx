@@ -72,16 +72,16 @@ export function ServiceCard({ service, locationId, onEdit, onDelete, onManageEmp
                   hover-revealed trigger — and, worse, the whole page, since
                   that lock lands on document.body, not just this card. */}
               <DropdownMenuItem onSelect={() => setTimeout(onEdit, 0)}>
-                <Pencil className="size-3.5" />
+                <Pencil className="size-3.5 mr-2" />
                 Edit
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => setTimeout(onManageEmployees, 0)}>
-                <Users className="size-3.5" />
+                <Users className="size-3.5 mr-2" />
                 Manage employees
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuDangerItem onSelect={() => setTimeout(onDelete, 0)}>
-                <Trash2 className="size-3.5" />
+                <Trash2 className="size-3.5 mr-2" />
                 Delete
               </DropdownMenuDangerItem>
             </DropdownMenuContent>

@@ -9,11 +9,11 @@ export function AppShell() {
     <SidebarProvider>
       <AppNav />
       <SidebarInset className="h-svh overflow-y-auto">
-        <div className="flex items-center justify-between gap-3 px-4 sm:px-8 h-15.5 border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-20">
+        <div className="flex items-center justify-between gap-3 px-4 sm:px-8 h-15.5 border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-20 shrink-0">
           <SidebarTrigger />
           <LocationSwitcher />
         </div>
-        <div className="px-4 sm:px-6 pt-4">
+        <div className="px-4 sm:px-6 pt-4 shrink-0">
           <TimezoneBanner />
         </div>
         <Outlet />

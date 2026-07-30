@@ -17,14 +17,6 @@ import { AssignLocationDialog } from "@/components/employees/assign-location-dia
 import { SyncButton } from "@/components/ui/sync-button";
 import { useLocationContext } from "@/contexts/location-context";
 
-// Every employee synced for the tenant, regardless of location assignment —
-// deliberately NOT scoped to whichever location is selected in the header
-// switcher (that used to hide every unassigned employee, which reads as
-// "employees didn't sync" when they're just waiting to be assigned). What an
-// admin manages by hand is each employee's schedule/time off (via the detail
-// dialog) and which single location they belong to (via the row menu) —
-// FlowPOS has no employee-location relationship at all, so that assignment
-// is entirely app-bookings-owned.
 export default function EmployeesPage() {
   const { locations, isLoading: locationsLoading } = useLocationContext();
   const [managing, setManaging] = useState<Employee | undefined>();
@@ -134,7 +126,7 @@ export default function EmployeesPage() {
                               pointer-events locked). */}
                           {emp.location_id ? (
                             <DropdownMenuItem onSelect={() => setTimeout(() => setManaging(emp), 0)}>
-                              <CalendarDays className="size-3.5" />
+                              <CalendarDays className="size-3.5 mr-2" />
                               Schedule
                             </DropdownMenuItem>
                           ) : (
@@ -144,7 +136,7 @@ export default function EmployeesPage() {
                                     a wrapping element for the tooltip to anchor to */}
                                 <div>
                                   <DropdownMenuItem disabled>
-                                    <CalendarDays className="size-3.5" />
+                                    <CalendarDays className="size-3.5 mr-2" />
                                     Schedule
                                   </DropdownMenuItem>
                                 </div>
@@ -153,7 +145,7 @@ export default function EmployeesPage() {
                             </Tooltip>
                           )}
                           <DropdownMenuItem onSelect={() => setTimeout(() => setAssigning(emp), 0)}>
-                            <MapPin className="size-3.5" />
+                            <MapPin className="size-3.5 mr-2" />
                             {emp.location_id ? "Change location" : "Assign to location"}
                           </DropdownMenuItem>
                         </DropdownMenuContent>

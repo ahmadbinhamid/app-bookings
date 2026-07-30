@@ -3,22 +3,27 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Badge, Button,
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@flowposltd/ui";
-import { MapPin, Users, AlertTriangle } from "lucide-react";
+import { MapPin, Users, AlertTriangle, Clock, MoreHorizontal } from "lucide-react";
 import { listLocations } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type Location } from "@/types";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageFallback } from "@/components/ui/page-fallback";
 import { AssignEmployeesDialog } from "@/components/locations/assign-employees-dialog";
+import { TimezoneDialog } from "@/components/locations/timezone-dialog";
 import { SyncButton } from "@/components/ui/sync-button";
 
 // Locations are read-only here — synced from FlowPOS (see
 // internal/modules/sync). What an admin manages by hand is which employees
-// belong to each one: FlowPOS has no employee-location relationship at all,
-// so that assignment lives entirely in app-bookings.
+// belong to each one, and each location's timezone: FlowPOS has no
+// employee-location relationship at all, and its own location timezone
+// isn't trusted as confirmed truth (see location.Repository.Upsert) — both
+// live entirely in app-bookings.
 export default function LocationsPage() {
   const [assigningTo, setAssigningTo] = useState<Location | undefined>();
+  const [settingTzFor, setSettingTzFor] = useState<Location | undefined>();
 
   const { data: locations = [], isLoading } = useQuery({
     queryKey: queryKeys.locations(),
@@ -78,10 +83,28 @@ export default function LocationsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="secondary" size="sm" onClick={() => setAssigningTo(loc)}>
-                      <Users className="size-3.5" />
-                      Assign employees
-                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="size-8">
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {/* Deferred to a macrotask so the DropdownMenu's own
+                            close/unmount fully commits before the Dialog
+                            mounts — see service-card.tsx for why (overlapping
+                            Radix modal teardown otherwise leaves
+                            pointer-events locked). */}
+                        <DropdownMenuItem onSelect={() => setTimeout(() => setSettingTzFor(loc), 0)}>
+                          <Clock className="size-3.5 mr-2" />
+                          Set timezone
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setTimeout(() => setAssigningTo(loc), 0)}>
+                          <Users className="size-3.5 mr-2" />
+                          Assign employees
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))}
@@ -94,6 +117,11 @@ export default function LocationsPage() {
         open={Boolean(assigningTo)}
         onClose={() => setAssigningTo(undefined)}
         location={assigningTo}
+      />
+      <TimezoneDialog
+        open={Boolean(settingTzFor)}
+        onClose={() => setSettingTzFor(undefined)}
+        location={settingTzFor}
       />
     </div>
   );
