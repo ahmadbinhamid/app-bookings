@@ -16,7 +16,7 @@ import { ApiError } from "@/lib/api/client";
 import { proposeBooking, confirmBooking, rescheduleBooking, listServices, listEmployees } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { serviceVisual } from "@/constants/service-visuals";
-import { cn, formatMoney, formatDuration, formatDateTime, formatTimeRange, buildTimeline, toISODateUTC, combineDateAndMinutes } from "@/utils";
+import { cn, formatMoney, formatDuration, formatDateTime, formatTimeRange, buildTimeline, toISODateInZone, minutesOfDayInZone, combineDateAndMinutesInZone } from "@/utils";
 import { useLocationTimezone } from "@/hooks/use-location-timezone";
 import { type Proposal, type Service, type Employee } from "@/types";
 
@@ -34,32 +34,33 @@ interface BookingWizardProps {
 type Step = "select" | "review";
 
 // An hour from now, minutes rounded up to the next quarter hour — a sane
-// starting point for "earliest start" before the admin adjusts it. In UTC —
-// every location is currently hardcoded to UTC (see toISODateUTC's doc
-// comment), so "now" for this picker means UTC now, not the browser's local
-// clock.
-function defaultEarliest(): { date: string; minutes: number } {
+// starting point for "earliest start" before the admin adjusts it. Read as
+// wall-clock time in the location's own timezone, not the browser's local
+// clock — an admin in one timezone may be managing a location in another.
+function defaultEarliest(timeZone: string): { date: string; minutes: number } {
   const d = new Date(Date.now() + 60 * 60 * 1000);
-  const raw = d.getUTCHours() * 60 + d.getUTCMinutes();
-  return { date: toISODateUTC(d), minutes: Math.ceil(raw / 15) * 15 };
+  const raw = minutesOfDayInZone(d, timeZone);
+  return { date: toISODateInZone(d, timeZone), minutes: Math.ceil(raw / 15) * 15 };
 }
 
-// UTC "now," as a date + minutes-of-day pair — the floor a picked earliest
-// start can never go below.
-function nowFloor(): { date: string; minutes: number } {
+// "Now," as a date + minutes-of-day pair in the location's own timezone —
+// the floor a picked earliest start can never go below.
+function nowFloor(timeZone: string): { date: string; minutes: number } {
   const d = new Date();
-  return { date: toISODateUTC(d), minutes: d.getUTCHours() * 60 + d.getUTCMinutes() };
+  return { date: toISODateInZone(d, timeZone), minutes: minutesOfDayInZone(d, timeZone) };
 }
 
 export function BookingWizard({ open, onClose, locationId, bookingId, initialServiceIds }: BookingWizardProps) {
   const qc = useQueryClient();
   const isReschedule = Boolean(bookingId);
-  const timeZone = useLocationTimezone();
+  // Falls back to UTC before the location has loaded — matches the
+  // backend's own DefaultTimezone placeholder for the same brief window.
+  const timeZone = useLocationTimezone() ?? "UTC";
 
   const [step, setStep] = useState<Step>("select");
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
-  const [earliestDate, setEarliestDate] = useState(() => defaultEarliest().date);
-  const [earliestMinutes, setEarliestMinutes] = useState(() => defaultEarliest().minutes);
+  const [earliestDate, setEarliestDate] = useState(() => defaultEarliest(timeZone).date);
+  const [earliestMinutes, setEarliestMinutes] = useState(() => defaultEarliest(timeZone).minutes);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [proposeError, setProposeError] = useState<string>("");
   const [customerName, setCustomerName] = useState("");
@@ -68,7 +69,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
 
   useEffect(() => {
     if (open) {
-      const def = defaultEarliest();
+      const def = defaultEarliest(timeZone);
       setStep("select");
       setSelectedServiceIds(initialServiceIds ?? []);
       setEarliestDate(def.date);
@@ -110,7 +111,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
     mutationFn: () =>
       proposeBooking(locationId, {
         services: selectedServiceIds.map((id) => ({ service_id: id })),
-        earliest_start: combineDateAndMinutes(earliestDate, earliestMinutes),
+        earliest_start: combineDateAndMinutesInZone(earliestDate, earliestMinutes, timeZone),
       }),
     onSuccess: (p) => {
       setProposal(p);
@@ -202,7 +203,7 @@ export function BookingWizard({ open, onClose, locationId, bookingId, initialSer
   // real time passes while this dialog sits open — a backstop behind the
   // picker's own min-date/min-time graying-out, for the rare case a
   // previously-valid selection ages into the past before submission.
-  const floor = nowFloor();
+  const floor = nowFloor(timeZone);
   const isPast = earliestDate < floor.date || (earliestDate === floor.date && earliestMinutes < floor.minutes);
 
   const proposalTimeline =

@@ -10,17 +10,24 @@ const MONTHS = [
 ];
 const DAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// This component only ever manipulates ISO date strings a caller has already
+// resolved in the relevant location's own timezone (see toISODateInZone in
+// utils/datetime.ts) — its own grid/month arithmetic is pure Y-M-D math with
+// no timezone of its own, so it's built on Date.UTC as a neutral, DST-free
+// epoch rather than the browser's local calendar. Using local getters here
+// used to let this grid disagree with the wizard's zone-based "now" floor
+// near a day boundary, silently disabling the time picker's past-time gating.
 function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 function parseISODate(iso: string): Date {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  return new Date(Date.UTC(y, m - 1, d));
 }
 
 function formatDisplayDate(iso: string): string {
-  return parseISODate(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return parseISODate(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 interface DayCell {
@@ -30,21 +37,21 @@ interface DayCell {
 }
 
 function buildMonthGrid(year: number, month: number): DayCell[] {
-  const first = new Date(year, month, 1);
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const first = new Date(Date.UTC(year, month, 1));
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   const cells: DayCell[] = [];
 
-  for (let i = first.getDay(); i > 0; i--) {
-    const d = new Date(year, month, 1 - i);
+  for (let i = first.getUTCDay(); i > 0; i--) {
+    const d = new Date(Date.UTC(year, month, 1 - i));
     cells.push({ date: d, iso: toISODate(d), inMonth: false });
   }
   for (let day = 1; day <= daysInMonth; day++) {
-    const d = new Date(year, month, day);
+    const d = new Date(Date.UTC(year, month, day));
     cells.push({ date: d, iso: toISODate(d), inMonth: true });
   }
   while (cells.length % 7 !== 0) {
     const prev = cells[cells.length - 1].date;
-    const d = new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1);
+    const d = new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth(), prev.getUTCDate() + 1));
     cells.push({ date: d, iso: toISODate(d), inMonth: false });
   }
   return cells;
@@ -119,10 +126,10 @@ export function DatePopover({ value, onChange, placeholder = "Select date", clas
     if (open && value) setCursor(parseISODate(value));
   }, [open, value]);
 
-  const cells = buildMonthGrid(cursor.getFullYear(), cursor.getMonth());
+  const cells = buildMonthGrid(cursor.getUTCFullYear(), cursor.getUTCMonth());
 
   function shiftMonth(delta: number) {
-    setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+    setCursor((c) => new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + delta, 1)));
   }
 
   return (
@@ -157,7 +164,7 @@ export function DatePopover({ value, onChange, placeholder = "Select date", clas
             className={POPOVER_CLASS}
           >
             <MonthNav
-              label={`${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`}
+              label={`${MONTHS[cursor.getUTCMonth()]} ${cursor.getUTCFullYear()}`}
               onPrev={() => shiftMonth(-1)}
               onNext={() => shiftMonth(1)}
             />
@@ -183,7 +190,7 @@ export function DatePopover({ value, onChange, placeholder = "Select date", clas
                         : c.inMonth && !tooEarly && "text-foreground hover:bg-muted"
                     )}
                   >
-                    {c.date.getDate()}
+                    {c.date.getUTCDate()}
                   </button>
                 );
               })}
@@ -218,10 +225,10 @@ export function DateRangePopover({ value, onChange, placeholder = "All dates", c
     420
   );
 
-  const cells = buildMonthGrid(cursor.getFullYear(), cursor.getMonth());
+  const cells = buildMonthGrid(cursor.getUTCFullYear(), cursor.getUTCMonth());
 
   function shiftMonth(delta: number) {
-    setCursor((c) => new Date(c.getFullYear(), c.getMonth() + delta, 1));
+    setCursor((c) => new Date(Date.UTC(c.getUTCFullYear(), c.getUTCMonth() + delta, 1)));
   }
 
   function pick(iso: string) {
@@ -280,7 +287,7 @@ export function DateRangePopover({ value, onChange, placeholder = "All dates", c
             className={POPOVER_CLASS}
           >
             <MonthNav
-              label={`${MONTHS[cursor.getMonth()]} ${cursor.getFullYear()}`}
+              label={`${MONTHS[cursor.getUTCMonth()]} ${cursor.getUTCFullYear()}`}
               onPrev={() => shiftMonth(-1)}
               onNext={() => shiftMonth(1)}
             />
@@ -294,7 +301,7 @@ export function DateRangePopover({ value, onChange, placeholder = "All dates", c
                   onClick={() => pick(c.iso)}
                   className={cn("size-9 text-body-3 font-medium grid place-items-center transition-colors", cellClass(c))}
                 >
-                  {c.date.getDate()}
+                  {c.date.getUTCDate()}
                 </button>
               ))}
             </div>

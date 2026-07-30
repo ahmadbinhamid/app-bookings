@@ -101,10 +101,10 @@ func (s *Service) syncLocations(ctx context.Context, tenantID uint64, apiKey str
 	}
 
 	for _, fl := range flowposLocations {
-		// TEMPORARY: forcing UTC here instead of fl.Timezone, per-location
-		// timezone selection isn't built yet — every location defaults to UTC
-		// until that lands. Revert to fl.Timezone once it does.
-		if _, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, location.DefaultTimezone); err != nil {
+		// fl.Timezone may be empty if FlowPOS's payload doesn't supply one —
+		// Upsert already falls back to DefaultTimezone ("UTC") in that case,
+		// and never overwrites a timezone an admin has since confirmed.
+		if _, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, fl.Timezone); err != nil {
 			return 0, "", fmt.Errorf("upsert location %q: %w", fl.FlowposID, err)
 		}
 	}

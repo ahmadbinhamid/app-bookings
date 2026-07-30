@@ -4,7 +4,7 @@ import {
   Badge, Button,
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
 } from "@flowposltd/ui";
-import { MapPin, Users } from "lucide-react";
+import { MapPin, Users, AlertTriangle } from "lucide-react";
 import { listLocations } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type Location } from "@/types";
@@ -67,17 +67,15 @@ export default function LocationsPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-content-secondary">
-                    {/* TEMPORARY: "Unconfirmed" badge dropped — every
-                        location defaults to (and stays) UTC until
-                        per-location timezone selection is built. Re-add
-                        once that feature lands:
-                        {!loc.timezone_confirmed && (
-                          <Badge variant="destructive" className="gap-1">
-                            <AlertTriangle className="size-3" />
-                            Unconfirmed
-                          </Badge>
-                        )} */}
-                    <div className="flex items-center gap-1.5">{loc.timezone}</div>
+                    <div className="flex items-center gap-1.5">
+                      {loc.timezone}
+                      {!loc.timezone_confirmed && (
+                        <Badge variant="destructive" className="gap-1">
+                          <AlertTriangle className="size-3" />
+                          Unconfirmed
+                        </Badge>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-right">
                     <Button variant="secondary" size="sm" onClick={() => setAssigningTo(loc)}>

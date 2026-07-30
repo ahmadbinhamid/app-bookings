@@ -8,7 +8,7 @@ import { DatePopover } from "@/components/ui/calendar-popover";
 import { TimePopover } from "@/components/ui/time-popover";
 import { listTimeOff, createTimeOff, deleteTimeOff } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
-import { combineDateAndMinutes, toISODateUTC } from "@/utils";
+import { combineDateAndMinutesInZone, toISODateInZone } from "@/utils";
 import { useLocationTimezone } from "@/hooks/use-location-timezone";
 
 interface EmployeeTimeOffEditorProps {
@@ -19,16 +19,18 @@ interface EmployeeTimeOffEditorProps {
 export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOffEditorProps) {
   const qc = useQueryClient();
   const key = queryKeys.timeOff(locationId, employeeId);
-  const timeZone = useLocationTimezone();
+  // Falls back to UTC before the location has loaded — matches the
+  // backend's own DefaultTimezone placeholder for the same brief window.
+  const timeZone = useLocationTimezone() ?? "UTC";
 
   const { data: timeOff = [], isLoading } = useQuery({
     queryKey: key,
     queryFn: () => listTimeOff(locationId, employeeId),
   });
 
-  // UTC — every location is currently hardcoded to UTC, and combineDateAndMinutes
-  // below treats the picked date/time as that location's wall clock.
-  const today = toISODateUTC(new Date());
+  // combineDateAndMinutesInZone below treats the picked date/time as that
+  // location's own wall clock, not the browser's.
+  const today = toISODateInZone(new Date(), timeZone);
   const [startDate, setStartDate] = useState(today);
   const [startMinutes, setStartMinutes] = useState(0);
   const [endDate, setEndDate] = useState(today);
@@ -38,8 +40,8 @@ export function EmployeeTimeOffEditor({ locationId, employeeId }: EmployeeTimeOf
 
   const createMut = useMutation({
     mutationFn: () => createTimeOff(locationId, employeeId, {
-      start_datetime: combineDateAndMinutes(startDate, startMinutes),
-      end_datetime: combineDateAndMinutes(endDate, endMinutes),
+      start_datetime: combineDateAndMinutesInZone(startDate, startMinutes, timeZone),
+      end_datetime: combineDateAndMinutesInZone(endDate, endMinutes, timeZone),
       reason: reason || undefined,
     }),
     onSuccess: () => {

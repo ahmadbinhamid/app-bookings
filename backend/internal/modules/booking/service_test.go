@@ -69,7 +69,7 @@ func TestPropose_GapExample_HaircutThenFacial(t *testing.T) {
 // opposite of its old name: Propose must still work against an unconfirmed
 // location rather than reject it. Restore the original rejection assertion
 // once that gate is re-enabled.
-func TestPropose_LocationTimezoneUnconfirmed_StillWorks(t *testing.T) {
+func TestPropose_LocationTimezoneUnset_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)
 	locID := seedLocationTZ(t, conn, "UTC", false) // NOT confirmed
@@ -83,8 +83,8 @@ func TestPropose_LocationTimezoneUnconfirmed_StillWorks(t *testing.T) {
 		Services:      []ServiceRequest{{ServiceID: haircut}},
 		EarliestStart: monday.Add(10 * time.Hour),
 	})
-	if err != nil {
-		t.Fatalf("expected Propose to succeed against an unconfirmed-timezone location while the gate is disabled, got: %v", err)
+	if err != ErrLocationTimezoneUnset {
+		t.Fatalf("expected ErrLocationTimezoneUnset for an unconfirmed-timezone location, got: %v", err)
 	}
 }
 
