@@ -177,14 +177,10 @@ export default function BookingsPage() {
                 const segs = b.segments ?? [];
                 const chips = [...new Set(segs.map((s) => serviceByID.get(s.service_id)?.name ?? s.service_id))];
                 const team = [...new Set(segs.map((s) => s.employee_id))].map((id) => employeeByID.get(id)?.name ?? id);
-                // A multi-service booking has several time slots — the table
-                // row shows only the latest one so it stays scannable; every
-                // slot is still visible in the detail dialog.
-                const latestSeg = segs.reduce<(typeof segs)[number] | undefined>(
-                  (latest, s) => (!latest || s.start_time > latest.start_time ? s : latest),
-                  undefined
-                );
+                const orderedSegs = [...segs].sort((a, b2) => a.start_time.localeCompare(b2.start_time));
                 const status = BOOKING_STATUS[b.status];
+                const cancelledCount = segs.filter((s) => s.status === "cancelled").length;
+                const isPartiallyCancelled = b.status !== "cancelled" && cancelledCount > 0 && cancelledCount < segs.length;
 
                 return (
                   <TableRow key={b.id} className="cursor-pointer" onClick={() => setViewingBookingId(b.id)}>
@@ -250,14 +246,24 @@ export default function BookingsPage() {
                     </TableCell>
 
                     <TableCell>
-                      {!latestSeg ? (
+                      {orderedSegs.length === 0 ? (
                         <span className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-body-3 font-medium bg-muted text-content-tertiary">
                           No appointments
                         </span>
                       ) : (
-                        <span className="text-body-3 text-content-secondary tabular-nums whitespace-nowrap">
-                          {formatTimeRange(latestSeg.start_time, latestSeg.end_time, timeZone)}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          {orderedSegs.map((s) => (
+                            <span
+                              key={s.id}
+                              className={cn(
+                                "text-body-3 leading-tight text-content-secondary tabular-nums whitespace-nowrap",
+                                s.status === "cancelled" && "opacity-55"
+                              )}
+                            >
+                              {formatTimeRange(s.start_time, s.end_time, timeZone)}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </TableCell>
 
@@ -268,9 +274,21 @@ export default function BookingsPage() {
                     </TableCell>
 
                     <TableCell>
-                      <Badge variant={status.badgeVariant} dotColor={status.dotClass}>
-                        {status.label}
-                      </Badge>
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant={status.badgeVariant} dotColor={status.dotClass}>
+                          {status.label}
+                        </Badge>
+                        {isPartiallyCancelled && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Badge variant="status-warning">{cancelledCount} cancelled</Badge>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {cancelledCount} of {segs.length} services on this booking {cancelledCount === 1 ? "was" : "were"} cancelled
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                      </div>
                     </TableCell>
 
                     <TableCell className="text-right font-semibold tabular-nums">{formatMoney(b.total_price)}</TableCell>
