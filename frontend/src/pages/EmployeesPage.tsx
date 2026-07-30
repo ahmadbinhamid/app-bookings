@@ -16,6 +16,7 @@ import { EmployeeDetailDialog } from "@/components/employees/employee-detail-dia
 import { AssignLocationDialog } from "@/components/employees/assign-location-dialog";
 import { SyncButton } from "@/components/ui/sync-button";
 import { useLocationContext } from "@/contexts/location-context";
+import { formatDateTime } from "@/utils";
 
 export default function EmployeesPage() {
   const { locations, isLoading: locationsLoading } = useLocationContext();
@@ -87,7 +88,10 @@ export default function EmployeesPage() {
                               </div>
                             </TooltipTrigger>
                             <TooltipContent>
-                              Synced from FlowPOS{emp.synced_at && ` · ${new Date(emp.synced_at).toLocaleString()}`}
+                              {/* Explicit UTC, not a per-location timezone: this list spans
+                                  employees across every location (or none at all), so there's
+                                  no single "right" location timezone to convert this into. */}
+                              Synced from FlowPOS{emp.synced_at && ` · ${formatDateTime(emp.synced_at, "UTC")} UTC`}
                             </TooltipContent>
                           </Tooltip>
                         </div>

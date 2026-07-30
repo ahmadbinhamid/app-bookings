@@ -43,17 +43,6 @@ type Summary struct {
 	EmployeesDeactivated int64  `json:"employees_deactivated"`
 }
 
-// SyncTenant fetches the tenant's location list from FlowPOS and upserts each
-// into `locations`, then separately syncs the tenant's employees exactly
-// once. Locations and employees are two independent, unrelated FlowPOS lists
-// — FlowPOS has no employee-location relationship at all (confirmed against
-// flowpos-backend's EmployeeController, see
-// internal/flowpos/employees_unconfirmed.go's header) — so unlike locations,
-// employees are NOT synced once per location; doing so would upsert the same
-// tenant-wide list under every location and make "one employee, one
-// location" impossible to express. Which single location an employee
-// belongs to is an app-bookings-only concept an admin sets by hand — see
-// internal/modules/employee.Service.AssignLocation.
 func (s *Service) SyncTenant(ctx context.Context, tenantID uint64) (Summary, error) {
 	inst, err := s.installations.GetByTenantID(tenantID)
 	if err != nil {
@@ -79,11 +68,6 @@ func (s *Service) SyncTenant(ctx context.Context, tenantID uint64) (Summary, err
 	}, nil
 }
 
-// syncLocations upserts every location FlowPOS returns for the tenant,
-// falling back to exactly one location per tenant only if FlowPOS's
-// /locations endpoint doesn't exist at all (ErrEndpointNotFound) — any other
-// error is a real failure and is returned as-is, never silently treated as
-// "must be single-location mode."
 func (s *Service) syncLocations(ctx context.Context, tenantID uint64, apiKey string) (int, string, error) {
 	flowposLocations, err := s.flowposClient.ListLocations(ctx, apiKey)
 	switch {
@@ -101,21 +85,14 @@ func (s *Service) syncLocations(ctx context.Context, tenantID uint64, apiKey str
 	}
 
 	for _, fl := range flowposLocations {
-		// fl.Timezone may be empty if FlowPOS's payload doesn't supply one —
-		// Upsert already falls back to DefaultTimezone ("UTC") in that case,
-		// and never overwrites a timezone an admin has since confirmed.
-		if _, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, fl.Timezone); err != nil {
+		// Every newly-synced location starts at DefaultTimezone ("UTC")
+		if _, err := s.locations.Upsert(tenantID, fl.FlowposID, fl.Name, location.DefaultTimezone); err != nil {
 			return 0, "", fmt.Errorf("upsert location %q: %w", fl.FlowposID, err)
 		}
 	}
 	return len(flowposLocations), "flowpos", nil
 }
 
-// syncEmployees fetches the tenant's complete employee list from FlowPOS
-// once — there is no location to scope by — and upserts it, idempotent by
-// (tenant_id, flowpos_employee_id), deactivating (never deleting) any
-// employee no longer returned. A malformed row (no id or name) is skipped
-// and logged rather than guessed at or allowed to fail the whole sync.
 func (s *Service) syncEmployees(ctx context.Context, tenantID uint64, apiKey string) (synced int, deactivated int64, err error) {
 	flowposEmployees, err := s.flowposClient.ListEmployees(ctx, apiKey)
 	if err != nil {

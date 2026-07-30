@@ -78,13 +78,13 @@ func (c *Client) do(ctx context.Context, method, path, apiKey string, out any) e
 // confirmed against a real FlowPOS response (quotes' own equivalent proxies
 // raw JSON straight through to its frontend precisely because the shape was
 // never pinned down server-side either; see quotes/internal/service/catalog.go
-// ListLocations). Timezone in particular may not exist in the real payload
-// at all — default to "UTC" when absent and treat it as a placeholder the
-// tenant may need to correct manually (Phase 3 UI) until this is confirmed.
+// ListLocations). There's no Timezone field: FlowPOS's payload has never been
+// confirmed to carry one, so every synced location is deliberately given
+// app-bookings' own UTC default instead (see sync.Service.syncLocations) —
+// an admin sets the real one manually.
 type Location struct {
 	FlowposID string `json:"id"`
 	Name      string `json:"name"`
-	Timezone  string `json:"timezone"`
 }
 
 // UnmarshalJSON tolerates FlowPOS returning a numeric id (as its other list
@@ -95,16 +95,14 @@ type Location struct {
 // error that would fail the whole list.
 func (l *Location) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID       json.RawMessage `json:"id"`
-		Name     string          `json:"name"`
-		Timezone string          `json:"timezone"`
+		ID   json.RawMessage `json:"id"`
+		Name string          `json:"name"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	l.FlowposID = parseFlexibleID(raw.ID)
 	l.Name = raw.Name
-	l.Timezone = raw.Timezone
 	return nil
 }
 

@@ -5,7 +5,7 @@ import {
   Table, TableHeader, TableBody, TableHead, TableRow, TableCell,
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
 } from "@flowposltd/ui";
-import { MapPin, Users, AlertTriangle, Clock, MoreHorizontal } from "lucide-react";
+import { MapPin, Users, Info, Clock, MoreHorizontal } from "lucide-react";
 import { listLocations } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { type Location } from "@/types";
@@ -15,12 +15,6 @@ import { AssignEmployeesDialog } from "@/components/locations/assign-employees-d
 import { TimezoneDialog } from "@/components/locations/timezone-dialog";
 import { SyncButton } from "@/components/ui/sync-button";
 
-// Locations are read-only here — synced from FlowPOS (see
-// internal/modules/sync). What an admin manages by hand is which employees
-// belong to each one, and each location's timezone: FlowPOS has no
-// employee-location relationship at all, and its own location timezone
-// isn't trusted as confirmed truth (see location.Repository.Upsert) — both
-// live entirely in app-bookings.
 export default function LocationsPage() {
   const [assigningTo, setAssigningTo] = useState<Location | undefined>();
   const [settingTzFor, setSettingTzFor] = useState<Location | undefined>();
@@ -75,9 +69,9 @@ export default function LocationsPage() {
                     <div className="flex items-center gap-1.5">
                       {loc.timezone}
                       {!loc.timezone_confirmed && (
-                        <Badge variant="destructive" className="gap-1">
-                          <AlertTriangle className="size-3" />
-                          Unconfirmed
+                        <Badge variant="status-info" className="gap-1">
+                          <Info className="size-3" />
+                          Default (UTC)
                         </Badge>
                       )}
                     </div>
