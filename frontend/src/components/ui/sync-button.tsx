@@ -3,6 +3,7 @@ import { toast } from "@/lib/toast";
 import { Button } from "@flowposltd/ui";
 import { RotateCw } from "lucide-react";
 import { triggerSync } from "@/lib/api";
+import { type ApiError } from "@/lib/api/client";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/utils";
 
@@ -24,7 +25,16 @@ export function SyncButton({ className }: { className?: string }) {
       qc.invalidateQueries({ queryKey: queryKeys.locations() });
       qc.invalidateQueries({ queryKey: ["employees"] });
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: ApiError) => {
+      // FlowPOS itself being down/erroring is a distinct, expected-ish
+      // condition — not this tenant's fault, and not a bug on our end —
+      // so it gets its own message rather than whatever raw text came back.
+      if (err.code === "FLOWPOS_UNAVAILABLE") {
+        toast.error("FlowPOS is having trouble right now — try syncing again in a few minutes.");
+      } else {
+        toast.error(err.message);
+      }
+    },
   });
 
   return (

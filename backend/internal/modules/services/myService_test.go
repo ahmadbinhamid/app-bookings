@@ -109,7 +109,7 @@ func TestMyService_ListScopedToLocationAndSearch(t *testing.T) {
 	mustCreate(locA, "Beard Trim")
 	mustCreate(locB, "Manicure")
 
-	items, total, err := svc.List(locA, pagination.Params{Page: 1, PerPage: 20}, "")
+	items, total, err := svc.List(locA, pagination.Params{Page: 1, PerPage: 20}, "", false)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestMyService_ListScopedToLocationAndSearch(t *testing.T) {
 		t.Fatalf("expected 2 services at location A (location B's must not leak in), got total=%d len=%d", total, len(items))
 	}
 
-	items, total, err = svc.List(locA, pagination.Params{Page: 1, PerPage: 20}, "Beard")
+	items, total, err = svc.List(locA, pagination.Params{Page: 1, PerPage: 20}, "Beard", false)
 	if err != nil {
 		t.Fatalf("List with search: %v", err)
 	}

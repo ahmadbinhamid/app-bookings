@@ -64,6 +64,14 @@ func respondErr(c *gin.Context, err error) {
 		errors.Is(err, booking.ErrAlreadyCompleted),
 		errors.Is(err, employee.ErrHasFutureBookings):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error(), "code": errCode(err)})
+	case errors.Is(err, flowpos.ErrUpstreamUnavailable):
+		// FlowPOS itself is down/erroring/unreachable — not this tenant's api_key
+		// or anything about the request. 503 (not 502) since retrying later, not
+		// changing anything about the request, is the only thing that helps.
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "FlowPOS is currently unavailable. Please try again in a few minutes.",
+			"code":  "FLOWPOS_UNAVAILABLE",
+		})
 	case errors.Is(err, flowpos.ErrUpstreamRejected):
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 	case errors.Is(err, flowpos.ErrInvalidInput), errors.Is(err, flowpos.ErrEndpointNotFound):

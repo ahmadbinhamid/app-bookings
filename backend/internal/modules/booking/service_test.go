@@ -63,12 +63,6 @@ func TestPropose_GapExample_HaircutThenFacial(t *testing.T) {
 	}
 }
 
-// TEMPORARY: the timezone-confirmation gate itself is disabled (see
-// Service.Propose's doc comment — every location defaults to and stays UTC
-// until per-location timezone selection is built), so this now asserts the
-// opposite of its old name: Propose must still work against an unconfirmed
-// location rather than reject it. Restore the original rejection assertion
-// once that gate is re-enabled.
 func TestPropose_LocationTimezoneUnset_Rejected(t *testing.T) {
 	conn := connectOrSkip(t)
 	svc := newBookingService(conn)

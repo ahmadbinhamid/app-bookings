@@ -34,13 +34,16 @@ func (c *Client) do(ctx context.Context, method, path, apiKey string, out any) e
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("%s %s: %w", method, path, err)
+		// Network-level failure (timeout, connection refused, DNS) — FlowPOS
+		// itself is unreachable, not a problem with this request.
+		return fmt.Errorf("%s %s: %w: %w", method, path, ErrUpstreamUnavailable, err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("%s %s: read response: %w", method, path, err)
+		// Connection dropped mid-read — same "FlowPOS's side" bucket as above.
+		return fmt.Errorf("%s %s: read response: %w: %w", method, path, ErrUpstreamUnavailable, err)
 	}
 
 	switch {
@@ -55,6 +58,10 @@ func (c *Client) do(ctx context.Context, method, path, apiKey string, out any) e
 		return fmt.Errorf("%s %s: %w: %s", method, path, ErrUpstreamRejected, respBody)
 	case resp.StatusCode >= 400 && resp.StatusCode < 500:
 		return fmt.Errorf("%s %s: %w: %s", method, path, ErrInvalidInput, respBody)
+	case resp.StatusCode >= 500:
+		// A real outage/bug on FlowPOS's own side, not something a
+		// differently-shaped request from us would fix.
+		return fmt.Errorf("%s %s: %w: status %d: %s", method, path, ErrUpstreamUnavailable, resp.StatusCode, respBody)
 	case resp.StatusCode >= 300:
 		return fmt.Errorf("%s %s: unexpected status %d: %s", method, path, resp.StatusCode, respBody)
 	}
@@ -66,7 +73,9 @@ func (c *Client) do(ctx context.Context, method, path, apiKey string, out any) e
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(respBody, &env); err != nil {
-		return fmt.Errorf("%s %s: decode envelope: %w", method, path, err)
+		// FlowPOS returned 2xx but a non-JSON/malformed body — still a
+		// problem on its side, not a request we sent wrong.
+		return fmt.Errorf("%s %s: decode envelope: %w: %w", method, path, ErrUpstreamUnavailable, err)
 	}
 	if len(env.Data) == 0 {
 		return nil
